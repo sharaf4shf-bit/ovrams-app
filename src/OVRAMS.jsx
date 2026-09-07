@@ -1,0 +1,1515 @@
+import React, { useState, useMemo, useEffect } from "react";
+import { supabase } from "./supabaseClient";
+import {
+  Truck, Users, Calendar, FileText, Bell, LayoutGrid,
+  ClipboardCheck, CheckCircle2, XCircle, ArrowLeftRight, Plus, Trash2,
+  Search, ChevronRight, User, Gauge, ShieldCheck, AlertTriangle, Printer,
+  Menu, Lock, LogOut, Eye, EyeOff,
+} from "lucide-react";
+
+/* ----------------------------------------------------------------------
+   OVRAMS — Organization Vehicle Request & Approval Management System
+   Interactive demo: login for each role, role-based views, full
+   MOYAS-F07 workflow, conflict detection, dashboard, request list.
+   In-memory state only.
+------------------------------------------------------------------------*/
+
+const SERIF = "'Source Serif 4', Georgia, serif";
+const SANS = "'IBM Plex Sans', system-ui, sans-serif";
+
+const COLORS = {
+  ink: "#2C2C2C",
+  inkSoft: "#5B5B54",
+  paper: "#F6F4EE",
+  paperDark: "#EDEAE1",
+  line: "#D9D4C6",
+  green: "#1B3A2F",
+  greenSoft: "#3D5A4C",
+  amber: "#B5842E",
+  amberBg: "#F3E7D2",
+  red: "#7A1F1F",
+  redBg: "#F3E1DF",
+  blueGrey: "#3D5568",
+};
+
+/* ---------------- Status model ---------------- */
+const STATUS = {
+  DRAFT: "Draft",
+  SUBMITTED: "Submitted",
+  DIVISION_REVIEW: "Division Head Review",
+  DIVISION_APPROVED: "Division Head Approved",
+  VEHICLE_REVIEW: "Vehicle Division Review",
+  VEHICLE_ASSIGNED: "Vehicle & Driver Assigned",
+  FINAL_REVIEW: "Final Approval Pending",
+  APPROVED: "Approved / Vehicle Allocated",
+  COMPLETED: "Completed",
+  REJECTED: "Rejected",
+  RETURNED: "Returned for Correction",
+  CANCELLED: "Cancelled",
+  UNAVAILABLE: "Vehicle Unavailable",
+};
+
+const STATUS_STYLE = (s) => {
+  if (s === STATUS.APPROVED || s === STATUS.COMPLETED)
+    return { bg: "#E4EAE3", fg: COLORS.green, border: COLORS.green };
+  if (s === STATUS.REJECTED || s === STATUS.UNAVAILABLE)
+    return { bg: COLORS.redBg, fg: COLORS.red, border: COLORS.red };
+  if (s === STATUS.RETURNED || s === STATUS.CANCELLED)
+    return { bg: "#EDEAE1", fg: COLORS.inkSoft, border: COLORS.line };
+  return { bg: COLORS.amberBg, fg: COLORS.amber, border: COLORS.amber };
+};
+
+const WORKFLOW_ORDER = [
+  STATUS.DRAFT, STATUS.SUBMITTED, STATUS.DIVISION_REVIEW, STATUS.DIVISION_APPROVED,
+  STATUS.VEHICLE_REVIEW, STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW,
+  STATUS.APPROVED, STATUS.COMPLETED,
+];
+
+/* ---------------- Demo data ---------------- */
+const DIVISIONS = ["Administration", "Finance", "Engineering", "Human Resources", "Legal Affairs"];
+
+/* Added: username + password fields for the login system. Everything else
+   about USERS is unchanged from the original data model. */
+const USERS = [
+  { id: "u1", name: "R. Jayasuriya", designation: "Assistant Registrar", division: "Administration", role: "applicant", username: "rjayasuriya", password: "apply123" },
+  { id: "u2", name: "N. Fernando", designation: "Programme Officer", division: "Engineering", role: "applicant", username: "nfernando", password: "apply123" },
+  { id: "u3", name: "K. Wickramasinghe", designation: "Division Head, Administration", division: "Administration", role: "division_head", username: "kwickramasinghe", password: "head123" },
+  { id: "u4", name: "S. Perera", designation: "Division Head, Engineering", division: "Engineering", role: "division_head", username: "sperera", password: "head123" },
+  { id: "u5", name: "M. Bandara", designation: "Transport Officer", division: "Vehicle Division", role: "transport_officer", username: "mbandara", password: "transport123" },
+  { id: "u6", name: "A. Additional Secretary", designation: "Additional Secretary (Admin)", division: "Administration", role: "final_approver", username: "asecretary", password: "final123" },
+  { id: "u7", name: "System Administrator", designation: "System Administrator", division: "IT", role: "admin", username: "admin", password: "admin123" },
+];
+
+const ROLE_LABEL = {
+  applicant: "Applicant",
+  division_head: "Division Head",
+  transport_officer: "Transport Officer",
+  final_approver: "Final Approving Officer",
+  admin: "System Administrator",
+};
+
+const VEHICLES_SEED = [
+  { id: "v1", reg: "WP-KA-1234", type: "Van", model: "Toyota HiAce (2019)", status: "Available", meter: 82011 },
+  { id: "v2", reg: "WP-KB-5566", type: "Car", model: "Toyota Axio (2021)", status: "Available", meter: 41302 },
+  { id: "v3", reg: "WP-CAB-8890", type: "Double Cab", model: "Mitsubishi L200 (2018)", status: "Maintenance", meter: 63120 },
+  { id: "v4", reg: "WP-KC-2210", type: "Car", model: "Nissan Sunny (2020)", status: "Available", meter: 58790 },
+  { id: "v5", reg: "WP-NB-4471", type: "Bus", model: "Ashok Leyland (2016)", status: "Available", meter: 121004 },
+];
+
+const DRIVERS_SEED = [
+  { id: "d1", name: "P. Silva", empNo: "DRV-0021", contact: "071-2223344", license: "B1122334", expiry: "2027-04-10", status: "Active" },
+  { id: "d2", name: "T. Kumara", empNo: "DRV-0033", contact: "077-5566778", license: "B2233445", expiry: "2026-11-02", status: "Active" },
+  { id: "d3", name: "L. Rathnayake", empNo: "DRV-0041", contact: "070-9988776", license: "B3344556", expiry: "2027-01-18", status: "On Leave" },
+];
+
+const REQUESTS_SEED = [
+  {
+    id: "REQ-2026-0142", applicantId: "u1", division: "Administration",
+    purpose: "Attend inter-ministerial coordination meeting",
+    destination: "BMICH, Colombo 07", journeyType: "Local",
+    start: "2026-09-05T08:00", end: "2026-09-05T17:00",
+    officers: [{ name: "R. Jayasuriya", designation: "Assistant Registrar", dept: "Administration" }],
+    adequateSpace: "Yes",
+    status: STATUS.SUBMITTED,
+    history: [{ who: "R. Jayasuriya", action: "Submitted request", at: "2026-09-01T09:12" }],
+    vehicleId: null, driverId: null, meter: null, observation: "",
+  },
+  {
+    id: "REQ-2026-0139", applicantId: "u2", division: "Engineering",
+    purpose: "Site inspection of bridge construction project",
+    destination: "Kalutara District", journeyType: "External",
+    start: "2026-09-04T06:30", end: "2026-09-04T19:00",
+    officers: [
+      { name: "N. Fernando", designation: "Programme Officer", dept: "Engineering" },
+      { name: "D. Gunasekara", designation: "Site Engineer", dept: "Engineering" },
+    ],
+    adequateSpace: "Yes",
+    status: STATUS.DIVISION_APPROVED,
+    history: [
+      { who: "N. Fernando", action: "Submitted request", at: "2026-08-30T10:03" },
+      { who: "S. Perera", action: "Approved (Division Head)", at: "2026-08-30T15:40" },
+    ],
+    vehicleId: null, driverId: null, meter: null, observation: "",
+  },
+  {
+    id: "REQ-2026-0136", applicantId: "u1", division: "Administration",
+    purpose: "Deliver documents to Provincial Office",
+    destination: "Kandy Provincial Office", journeyType: "External",
+    start: "2026-09-03T07:00", end: "2026-09-03T18:00",
+    officers: [{ name: "R. Jayasuriya", designation: "Assistant Registrar", dept: "Administration" }],
+    adequateSpace: "Yes", status: STATUS.VEHICLE_ASSIGNED,
+    history: [
+      { who: "R. Jayasuriya", action: "Submitted request", at: "2026-08-28T09:00" },
+      { who: "K. Wickramasinghe", action: "Approved (Division Head)", at: "2026-08-28T14:22" },
+      { who: "M. Bandara", action: "Vehicle & driver assigned", at: "2026-08-29T08:15" },
+    ],
+    vehicleId: "v2", driverId: "d1", meter: 41302, observation: "Vehicle in good condition, full tank.",
+  },
+  {
+    id: "REQ-2026-0128", applicantId: "u2", division: "Engineering",
+    purpose: "Training workshop attendance",
+    destination: "NIBM, Colombo 07", journeyType: "Local",
+    start: "2026-08-25T08:00", end: "2026-08-25T16:00",
+    officers: [{ name: "N. Fernando", designation: "Programme Officer", dept: "Engineering" }],
+    adequateSpace: "Yes",
+    status: STATUS.APPROVED,
+    history: [
+      { who: "N. Fernando", action: "Submitted request", at: "2026-08-20T09:00" },
+      { who: "S. Perera", action: "Approved (Division Head)", at: "2026-08-20T13:00" },
+      { who: "M. Bandara", action: "Vehicle & driver assigned", at: "2026-08-21T09:00" },
+      { who: "A. Additional Secretary", action: "Final approval granted", at: "2026-08-21T15:00" },
+    ],
+    vehicleId: "v4", driverId: "d2", meter: 58790, observation: "Routine local trip.",
+  },
+  {
+    id: "REQ-2026-0119", applicantId: "u1", division: "Administration",
+    purpose: "Personal errand request (test rejection)",
+    destination: "Negombo", journeyType: "Local",
+    start: "2026-08-15T08:00", end: "2026-08-15T12:00",
+    officers: [{ name: "R. Jayasuriya", designation: "Assistant Registrar", dept: "Administration" }],
+    adequateSpace: "No",
+    status: STATUS.REJECTED,
+    history: [
+      { who: "R. Jayasuriya", action: "Submitted request", at: "2026-08-10T09:00" },
+      { who: "K. Wickramasinghe", action: "Rejected (Division Head)", at: "2026-08-10T11:00", comment: "Not an official duty." },
+    ],
+    vehicleId: null, driverId: null, meter: null, observation: "",
+  },
+  {
+    id: "REQ-2026-0101", applicantId: "u2", division: "Engineering",
+    purpose: "Quarterly asset audit visit",
+    destination: "Galle Regional Office", journeyType: "External",
+    start: "2026-07-20T07:00", end: "2026-07-20T19:00",
+    officers: [{ name: "N. Fernando", designation: "Programme Officer", dept: "Engineering" }],
+    adequateSpace: "Yes",
+    status: STATUS.COMPLETED,
+    history: [
+      { who: "N. Fernando", action: "Submitted request", at: "2026-07-15T09:00" },
+      { who: "S. Perera", action: "Approved (Division Head)", at: "2026-07-15T12:00" },
+      { who: "M. Bandara", action: "Vehicle & driver assigned", at: "2026-07-16T09:00" },
+      { who: "A. Additional Secretary", action: "Final approval granted", at: "2026-07-16T14:00" },
+      { who: "M. Bandara", action: "Trip marked completed", at: "2026-07-20T20:00" },
+    ],
+    vehicleId: "v1", driverId: "d1", meter: 82011, observation: "Completed without incident.",
+  },
+];
+
+/* ---------------- Helpers ---------------- */
+function fmtDT(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+function fmtD(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+}
+function overlaps(aStart, aEnd, bStart, bEnd) {
+  return new Date(aStart) < new Date(bEnd) && new Date(bStart) < new Date(aEnd);
+}
+function userById(id) { return USERS.find((u) => u.id === id); }
+function vehicleById(id) { return VEHICLES_SEED.find((v) => v.id === id); }
+function driverById(id) { return DRIVERS_SEED.find((d) => d.id === id); }
+
+/* ---------------- Small UI atoms ---------------- */
+function Badge({ status }) {
+  const s = STATUS_STYLE(status);
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "3px 10px", fontSize: 12.5, fontFamily: SANS, fontWeight: 600,
+      color: s.fg, background: s.bg, border: `1px solid ${s.border}`,
+      borderRadius: 3, letterSpacing: 0.1, whiteSpace: "nowrap",
+    }}>
+      {status}
+    </span>
+  );
+}
+
+function SectionCard({ label, title, children, right }) {
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, marginBottom: 16 }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "12px 20px", background: COLORS.paperDark, borderBottom: `1px solid ${COLORS.line}`,
+      }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          {label && (
+            <span style={{ fontFamily: SANS, fontSize: 11.5, fontWeight: 700, color: COLORS.greenSoft }}>
+              {label}
+            </span>
+          )}
+          <h3 style={{ fontFamily: SERIF, fontSize: 17, margin: 0, color: COLORS.ink, fontWeight: 600 }}>{title}</h3>
+        </div>
+        {right}
+      </div>
+      <div style={{ padding: 20 }}>{children}</div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.inkSoft, marginBottom: 4 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Btn({ children, onClick, variant = "primary", icon: Icon, disabled, small, type }) {
+  const styles = {
+    primary: { bg: COLORS.green, fg: "#fff", border: COLORS.green },
+    danger: { bg: "#fff", fg: COLORS.red, border: COLORS.red },
+    ghost: { bg: "#fff", fg: COLORS.ink, border: COLORS.line },
+    amber: { bg: COLORS.amber, fg: "#fff", border: COLORS.amber },
+  }[variant];
+  return (
+    <button
+      type={type || "button"}
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 7,
+        fontFamily: SANS, fontSize: small ? 12.5 : 13.5, fontWeight: 600,
+        padding: small ? "6px 12px" : "9px 16px", borderRadius: 3,
+        background: disabled ? "#E4E1D8" : styles.bg,
+        color: disabled ? "#9A9686" : styles.fg,
+        border: `1px solid ${disabled ? "#D9D4C6" : styles.border}`,
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "opacity .15s",
+      }}
+      onMouseDown={(e) => { if (!disabled) e.currentTarget.style.opacity = "0.85"; }}
+      onMouseUp={(e) => { e.currentTarget.style.opacity = "1"; }}
+    >
+      {Icon && <Icon size={small ? 14 : 15} />}
+      {children}
+    </button>
+  );
+}
+
+function Input(props) {
+  return (
+    <input
+      {...props}
+      style={{
+        width: "100%", fontFamily: SANS, fontSize: 14, padding: "8px 10px",
+        border: `1px solid ${COLORS.line}`, borderRadius: 3, color: COLORS.ink,
+        background: "#fff", boxSizing: "border-box",
+        ...(props.style || {}),
+      }}
+    />
+  );
+}
+
+function Select(props) {
+  return (
+    <select
+      {...props}
+      style={{
+        width: "100%", fontFamily: SANS, fontSize: 14, padding: "8px 10px",
+        border: `1px solid ${COLORS.line}`, borderRadius: 3, color: COLORS.ink,
+        background: "#fff", boxSizing: "border-box",
+        ...(props.style || {}),
+      }}
+    >
+      {props.children}
+    </select>
+  );
+}
+
+function TextArea(props) {
+  return (
+    <textarea
+      {...props}
+      style={{
+        width: "100%", fontFamily: SANS, fontSize: 14, padding: "8px 10px",
+        border: `1px solid ${COLORS.line}`, borderRadius: 3, color: COLORS.ink,
+        background: "#fff", boxSizing: "border-box", resize: "vertical", minHeight: 70,
+        ...(props.style || {}),
+      }}
+    />
+  );
+}
+
+function Stat({ label, value, accent }) {
+  return (
+    <div style={{ flex: "1 1 140px", background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "14px 16px" }}>
+      <div style={{ fontFamily: SERIF, fontSize: 28, color: accent || COLORS.ink, fontWeight: 600, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: COLORS.inkSoft, marginTop: 4 }}>{label}</div>
+    </div>
+  );
+}
+
+function MiniBars({ data, colorFn }) {
+  const max = Math.max(...data.map((d) => d.value), 1);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 120, padding: "0 4px" }}>
+      {data.map((d, i) => (
+        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+          <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.inkSoft }}>{d.value}</div>
+          <div style={{
+            width: "100%", maxWidth: 34, height: Math.max(6, (d.value / max) * 84),
+            background: colorFn ? colorFn(d) : COLORS.greenSoft, borderRadius: "2px 2px 0 0",
+          }} />
+          <div style={{ fontFamily: SANS, fontSize: 10.5, color: COLORS.inkSoft, textAlign: "center" }}>{d.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ================= LOGIN SCREEN ================= */
+/* One login form serving all five roles. The person selects their role,
+   which filters the account list and label shown, then authenticates
+   with a username + password matched against the USERS table. */
+function LoginScreen({ onLogin }) {
+  const [roleKey, setRoleKey] = useState("applicant");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    // STAGE 1: identity (name/role/division) now comes from the live
+    // Supabase database instead of the hardcoded USERS array.
+    // Password checking here is still temporary/local — real hashed-password
+    // auth via Supabase Auth is a separate, later step (Stage 1B).
+    const { data, error: dbError } = await supabase
+      .from("app_users")
+      .select("*")
+      .eq("role", roleKey)
+      .ilike("username", username.trim());
+
+    setLoading(false);
+
+    if (dbError) {
+      setError("Could not reach the database. Check your connection and try again.");
+      console.error(dbError);
+      return;
+    }
+
+    const dbMatch = data && data[0];
+    const localMatch = USERS.find(
+      (u) => u.role === roleKey && u.username.toLowerCase() === username.trim().toLowerCase()
+    );
+
+    if (!dbMatch || !localMatch || localMatch.password !== password) {
+      setError("Incorrect username or password for the selected role.");
+      return;
+    }
+
+    // Merge: use the database row as the source of truth for identity fields,
+    // but keep the local `id` shape the rest of the app already expects.
+    onLogin({ ...localMatch, ...dbMatch, id: localMatch.id });
+  }
+
+  return (
+    <div style={{
+      fontFamily: SANS, background: COLORS.paper, minHeight: "100vh",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; }
+        ::selection { background: ${COLORS.amberBg}; }
+      `}</style>
+      <div style={{ width: "100%", maxWidth: 420 }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 22 }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 8, background: COLORS.green,
+            display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12,
+          }}>
+            <Truck size={26} color="#fff" />
+          </div>
+          <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 21, color: COLORS.ink }}>OVRAMS</div>
+          <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.inkSoft, letterSpacing: 0.2, marginTop: 2 }}>
+            Vehicle Request &amp; Approval Management System
+          </div>
+        </div>
+
+        <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 5, overflow: "hidden" }}>
+          <div style={{ padding: "18px 24px 8px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Lock size={15} color={COLORS.greenSoft} />
+              <h2 style={{ fontFamily: SERIF, fontSize: 17, margin: 0, color: COLORS.ink, fontWeight: 600 }}>
+                Officer Log In
+              </h2>
+            </div>
+            <div style={{ fontFamily: SANS, fontSize: 11.5, color: COLORS.inkSoft, marginBottom: 10 }}>
+              Select your role
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
+              {Object.keys(ROLE_LABEL).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => { setRoleKey(r); setError(""); }}
+                  style={{
+                    fontSize: 11.5, fontFamily: SANS, fontWeight: 600, whiteSpace: "nowrap",
+                    padding: "6px 11px", borderRadius: 3, cursor: "pointer",
+                    border: `1px solid ${roleKey === r ? COLORS.green : COLORS.line}`,
+                    background: roleKey === r ? COLORS.green : "#fff",
+                    color: roleKey === r ? "#fff" : COLORS.ink,
+                  }}
+                >
+                  {ROLE_LABEL[r]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} style={{ padding: 24 }}>
+            <Field label="Username">
+              <Input
+                autoFocus
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="e.g. rjayasuriya"
+              />
+            </Field>
+            <Field label="Password">
+              <div style={{ position: "relative" }}>
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter password"
+                  style={{ paddingRight: 38 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  style={{
+                    position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer", color: COLORS.inkSoft,
+                    display: "flex", alignItems: "center", padding: 4,
+                  }}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </Field>
+
+            {error && (
+              <div style={{
+                display: "flex", gap: 8, alignItems: "center", background: COLORS.redBg,
+                color: COLORS.red, padding: "9px 12px", borderRadius: 3, fontSize: 12.5,
+                marginBottom: 14, fontFamily: SANS,
+              }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
+              </div>
+            )}
+
+            <Btn type="submit" onClick={handleSubmit} icon={Lock} disabled={loading}>
+              {loading ? "Checking…" : `Log In as ${ROLE_LABEL[roleKey]}`}
+            </Btn>
+
+            <div style={{
+              marginTop: 18, paddingTop: 14, borderTop: `1px solid ${COLORS.line}`,
+              fontFamily: SANS, fontSize: 11.5, color: COLORS.inkSoft, lineHeight: 1.6,
+            }}>
+              Demo credentials for {ROLE_LABEL[roleKey]}:
+              <br />
+              {USERS.filter((u) => u.role === roleKey).map((u) => (
+                <span key={u.id} style={{ display: "block" }}>
+                  {u.name} — <strong>{u.username}</strong> / <strong>{u.password}</strong>
+                </span>
+              ))}
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= MAIN APP ================= */
+export default function OVRAMS() {
+  /* Added: session state. No one sees any page until authenticated. */
+  const [session, setSession] = useState(null);
+
+  const [requests, setRequests] = useState(REQUESTS_SEED);
+  const [vehicles] = useState(VEHICLES_SEED);
+  const [drivers] = useState(DRIVERS_SEED);
+  const [page, setPage] = useState("dashboard");
+  const [selectedReqId, setSelectedReqId] = useState(null);
+  const [showNewRequest, setShowNewRequest] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  function showToast(msg) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2600);
+  }
+  function pushHistory(req, action, comment) {
+    return {
+      ...req,
+      history: [...req.history, { who: session.name, action, at: new Date().toISOString(), comment }],
+    };
+  }
+  function updateRequest(id, updater) {
+    setRequests((rs) => rs.map((r) => (r.id === id ? updater(r) : r)));
+  }
+
+  function handleLogin(user) {
+    setSession(user);
+    setPage("dashboard");
+    setSelectedReqId(null);
+    showToast(`Welcome, ${user.name}.`);
+  }
+  function handleLogout() {
+    setSession(null);
+    setPage("dashboard");
+    setSelectedReqId(null);
+    setNavOpen(false);
+  }
+
+  /* All hooks must run on every render, in the same order, whether or not
+     someone is logged in — otherwise React throws error #310. So the
+     useMemo calls stay here, unconditionally, and the login-screen
+     early-return happens further down, after every hook has run. */
+  const currentUser = session; // may be null when logged out
+  const roleKey = currentUser ? currentUser.role : null;
+
+  const stats = useMemo(() => {
+    const total = requests.length;
+    const pending = requests.filter((r) => ![STATUS.APPROVED, STATUS.COMPLETED, STATUS.REJECTED, STATUS.CANCELLED, STATUS.RETURNED, STATUS.UNAVAILABLE].includes(r.status)).length;
+    const approved = requests.filter((r) => r.status === STATUS.APPROVED).length;
+    const rejected = requests.filter((r) => r.status === STATUS.REJECTED).length;
+    const completed = requests.filter((r) => r.status === STATUS.COMPLETED).length;
+    return { total, pending, approved, rejected, completed };
+  }, [requests]);
+
+  const byDivision = useMemo(() => {
+    return DIVISIONS.map((d) => ({ label: d.split(" ")[0], value: requests.filter((r) => r.division === d).length }));
+  }, [requests]);
+
+  const byMonth = useMemo(() => {
+    const m = {};
+    requests.forEach((r) => {
+      const key = new Date(r.start).toLocaleString(undefined, { month: "short" });
+      m[key] = (m[key] || 0) + 1;
+    });
+    return Object.entries(m).map(([label, value]) => ({ label, value }));
+  }, [requests]);
+
+  /* If nobody is logged in, show the login screen and stop here. */
+  if (!session) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  const NAV = {
+    applicant: [
+      { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
+      { key: "my-requests", label: "My Requests", icon: FileText },
+    ],
+    division_head: [
+      { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
+      { key: "approvals", label: "Approvals", icon: ClipboardCheck },
+    ],
+    transport_officer: [
+      { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
+      { key: "vehicle-review", label: "Vehicle Assignment", icon: Truck },
+      { key: "schedule", label: "Schedule", icon: Calendar },
+      { key: "vehicles", label: "Vehicles", icon: Truck },
+      { key: "drivers", label: "Drivers", icon: Users },
+    ],
+    final_approver: [
+      { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
+      { key: "final-approval", label: "Final Approval", icon: ShieldCheck },
+    ],
+    admin: [
+      { key: "dashboard", label: "Dashboard", icon: LayoutGrid },
+      { key: "all-requests", label: "All Requests", icon: FileText },
+      { key: "vehicles", label: "Vehicles", icon: Truck },
+      { key: "drivers", label: "Drivers", icon: Users },
+      { key: "schedule", label: "Schedule", icon: Calendar },
+      { key: "users", label: "Users", icon: Users },
+      { key: "audit", label: "Audit Log", icon: ShieldCheck },
+    ],
+  };
+  const nav = NAV[roleKey];
+
+  return (
+    <div style={{ fontFamily: SANS, background: COLORS.paper, minHeight: "100vh", color: COLORS.ink }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; }
+        ::selection { background: ${COLORS.amberBg}; }
+      `}</style>
+
+      {/* ---- Top bar ---- */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 20px", background: COLORS.green, color: "#fff",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={() => setNavOpen((v) => !v)} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", display: "flex" }}>
+            <Menu size={20} />
+          </button>
+          <Truck size={20} />
+          <div>
+            <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 16, lineHeight: 1 }}>OVRAMS</div>
+            <div style={{ fontSize: 10, opacity: 0.75, letterSpacing: 0.3 }}>Vehicle Request &amp; Approval Management</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <Bell size={17} style={{ opacity: 0.85 }} />
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{currentUser.name}</div>
+            <div style={{ fontSize: 10.5, opacity: 0.75 }}>{ROLE_LABEL[roleKey]}</div>
+          </div>
+          <button
+            onClick={handleLogout}
+            title="Log out"
+            style={{
+              display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.12)",
+              border: "1px solid rgba(255,255,255,0.3)", color: "#fff", cursor: "pointer",
+              borderRadius: 3, padding: "6px 10px", fontFamily: SANS, fontSize: 12, fontWeight: 600,
+            }}
+          >
+            <LogOut size={14} /> Log Out
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex" }}>
+        {/* ---- Sidebar ---- */}
+        <div style={{
+          width: navOpen ? 210 : 0, overflow: "hidden", transition: "width .15s",
+          borderRight: navOpen ? `1px solid ${COLORS.line}` : "none", background: "#fff", minHeight: "calc(100vh - 49px)",
+        }}>
+          <div style={{ padding: "14px 10px", width: 210 }}>
+            {nav.map((item) => {
+              const Icon = item.icon;
+              const active = page === item.key;
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => { setPage(item.key); setSelectedReqId(null); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%",
+                    padding: "9px 12px", marginBottom: 2, border: "none", borderRadius: 3,
+                    background: active ? COLORS.paperDark : "transparent",
+                    color: active ? COLORS.green : COLORS.ink,
+                    fontFamily: SANS, fontSize: 13.5, fontWeight: active ? 700 : 500,
+                    cursor: "pointer", textAlign: "left",
+                    borderLeft: active ? `3px solid ${COLORS.green}` : "3px solid transparent",
+                  }}
+                >
+                  <Icon size={16} />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ---- Main content ---- */}
+        <div style={{ flex: 1, padding: "22px 26px", minWidth: 0 }}>
+          {selectedReqId ? (
+            <RequestDetail
+              req={requests.find((r) => r.id === selectedReqId)}
+              onBack={() => setSelectedReqId(null)}
+              roleKey={roleKey}
+              currentUser={currentUser}
+              vehicles={vehicles}
+              drivers={drivers}
+              requests={requests}
+              updateRequest={updateRequest}
+              pushHistory={pushHistory}
+              showToast={showToast}
+            />
+          ) : page === "dashboard" ? (
+            <Dashboard
+              roleKey={roleKey}
+              currentUser={currentUser}
+              requests={requests}
+              stats={stats}
+              byDivision={byDivision}
+              byMonth={byMonth}
+              vehicles={vehicles}
+              onOpen={setSelectedReqId}
+              onNewRequest={() => setShowNewRequest(true)}
+            />
+          ) : page === "my-requests" ? (
+            <RequestList
+              title="My Requests"
+              requests={requests.filter((r) => r.applicantId === currentUser.id)}
+              onOpen={setSelectedReqId}
+              onNewRequest={() => setShowNewRequest(true)}
+              showNew
+              showFilters
+            />
+          ) : page === "approvals" ? (
+            <RequestList
+              title="Pending Division Approvals"
+              requests={requests.filter((r) => r.division === currentUser.division && r.status === STATUS.SUBMITTED)}
+              onOpen={setSelectedReqId}
+              emptyMsg="No requests awaiting your review."
+            />
+          ) : page === "vehicle-review" ? (
+            <RequestList
+              title="Requests Awaiting Vehicle Assignment"
+              requests={requests.filter((r) => r.status === STATUS.DIVISION_APPROVED)}
+              onOpen={setSelectedReqId}
+              emptyMsg="No requests awaiting vehicle assignment."
+            />
+          ) : page === "final-approval" ? (
+            <RequestList
+              title="Requests Awaiting Final Approval"
+              requests={requests.filter((r) => r.status === STATUS.VEHICLE_ASSIGNED)}
+              onOpen={setSelectedReqId}
+              emptyMsg="No requests awaiting final approval."
+            />
+          ) : page === "all-requests" ? (
+            <RequestList title="All Vehicle Requests" requests={requests} onOpen={setSelectedReqId} showFilters />
+          ) : page === "vehicles" ? (
+            <VehiclePanel vehicles={vehicles} requests={requests} />
+          ) : page === "drivers" ? (
+            <DriverPanel drivers={drivers} requests={requests} />
+          ) : page === "schedule" ? (
+            <SchedulePanel requests={requests} vehicles={vehicles} drivers={drivers} />
+          ) : page === "users" ? (
+            <UsersPanel />
+          ) : page === "audit" ? (
+            <AuditPanel requests={requests} />
+          ) : null}
+        </div>
+      </div>
+
+      {showNewRequest && (
+        <NewRequestModal
+          currentUser={currentUser}
+          onClose={() => setShowNewRequest(false)}
+          onSubmit={(newReq) => {
+            setRequests((rs) => [newReq, ...rs]);
+            setShowNewRequest(false);
+            showToast(`Request ${newReq.id} submitted for division review.`);
+          }}
+        />
+      )}
+
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)",
+          background: COLORS.ink, color: "#fff", padding: "10px 18px", borderRadius: 4,
+          fontFamily: SANS, fontSize: 13, boxShadow: "0 4px 16px rgba(0,0,0,.25)", zIndex: 1000,
+        }}>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= DASHBOARD ================= */
+function Dashboard({ roleKey, currentUser, requests, stats, byDivision, byMonth, vehicles, onOpen, onNewRequest }) {
+  const mine = requests.filter((r) => r.applicantId === currentUser.id);
+  const available = vehicles.filter((v) => v.status === "Available").length;
+  const assigned = requests.filter((r) => [STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW, STATUS.APPROVED].includes(r.status)).length;
+
+  return (
+    <div>
+      <PageHeader
+        title={roleKey === "applicant" ? "My Dashboard" : "Dashboard"}
+        subtitle={`Overview for ${currentUser.name} — ${currentUser.designation}`}
+        action={roleKey === "applicant" && <Btn icon={Plus} onClick={onNewRequest}>New Vehicle Request</Btn>}
+      />
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 22 }}>
+        {roleKey === "applicant" ? (
+          <>
+            <Stat label="Total Requests" value={mine.length} />
+            <Stat label="Pending" value={mine.filter((r) => ![STATUS.APPROVED, STATUS.COMPLETED, STATUS.REJECTED, STATUS.CANCELLED].includes(r.status)).length} accent={COLORS.amber} />
+            <Stat label="Approved" value={mine.filter((r) => r.status === STATUS.APPROVED).length} />
+            <Stat label="Rejected" value={mine.filter((r) => r.status === STATUS.REJECTED).length} accent={COLORS.red} />
+            <Stat label="Completed" value={mine.filter((r) => r.status === STATUS.COMPLETED).length} />
+          </>
+        ) : (
+          <>
+            <Stat label="Total Requests" value={stats.total} />
+            <Stat label="Pending Approval" value={stats.pending} accent={COLORS.amber} />
+            <Stat label="Approved" value={stats.approved} />
+            <Stat label="Rejected" value={stats.rejected} accent={COLORS.red} />
+            <Stat label="Vehicles Available" value={available} />
+            <Stat label="Vehicles Assigned" value={assigned} />
+          </>
+        )}
+      </div>
+      {roleKey !== "applicant" && (
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 20 }}>
+          <div style={{ flex: "1 1 320px", background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: 16 }}>
+            <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Requests by Division</div>
+            <MiniBars data={byDivision} colorFn={() => COLORS.greenSoft} />
+          </div>
+          <div style={{ flex: "1 1 320px", background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: 16 }}>
+            <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Requests by Month</div>
+            <MiniBars data={byMonth} colorFn={() => COLORS.amber} />
+          </div>
+        </div>
+      )}
+      <SectionCard title="Recent Requests" label="">
+        <RequestTable requests={(roleKey === "applicant" ? mine : requests).slice(0, 6)} onOpen={onOpen} />
+      </SectionCard>
+    </div>
+  );
+}
+
+function PageHeader({ title, subtitle, action }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
+      <div>
+        <h1 style={{ fontFamily: SERIF, fontSize: 24, margin: 0, color: COLORS.ink, fontWeight: 700 }}>{title}</h1>
+        {subtitle && <div style={{ fontFamily: SANS, fontSize: 13, color: COLORS.inkSoft, marginTop: 4 }}>{subtitle}</div>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/* ================= REQUEST TABLE / LIST ================= */
+function RequestTable({ requests, onOpen }) {
+  if (requests.length === 0) {
+    return <div style={{ fontFamily: SANS, fontSize: 13.5, color: COLORS.inkSoft, padding: "24px 0" }}>No requests to show.</div>;
+  }
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
+        <thead>
+          <tr style={{ borderBottom: `2px solid ${COLORS.ink}` }}>
+            {["Request ID", "Destination", "Start", "End", "Status", ""].map((h) => (
+              <th key={h} style={{ textAlign: "left", padding: "8px 10px", fontWeight: 600, color: COLORS.inkSoft, fontSize: 11.5 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {requests.map((r) => (
+            <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+              <td style={{ padding: "10px 10px", fontWeight: 600 }}>{r.id}</td>
+              <td style={{ padding: "10px 10px" }}>{r.destination}</td>
+              <td style={{ padding: "10px 10px" }}>{fmtD(r.start)}</td>
+              <td style={{ padding: "10px 10px" }}>{fmtD(r.end)}</td>
+              <td style={{ padding: "10px 10px" }}><Badge status={r.status} /></td>
+              <td style={{ padding: "10px 10px" }}>
+                <Btn small variant="ghost" onClick={() => onOpen(r.id)}>View</Btn>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RequestList({ title, requests, onOpen, onNewRequest, showNew, emptyMsg, showFilters }) {
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const filtered = requests.filter((r) => {
+    const matchQ = !q || r.id.toLowerCase().includes(q.toLowerCase()) || r.destination.toLowerCase().includes(q.toLowerCase());
+    const matchS = !statusFilter || r.status === statusFilter;
+    return matchQ && matchS;
+  });
+  return (
+    <div>
+      <PageHeader title={title} action={showNew && <Btn icon={Plus} onClick={onNewRequest}>New Vehicle Request</Btn>} />
+      {showFilters && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+          <div style={{ position: "relative", flex: "1 1 220px" }}>
+            <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
+            <Input placeholder="Search by ID or destination…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
+          </div>
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ maxWidth: 220 }}>
+            <option value="">All statuses</option>
+            {Object.values(STATUS).map((s) => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </div>
+      )}
+      {filtered.length === 0 ? (
+        <div style={{ fontFamily: SANS, fontSize: 13.5, color: COLORS.inkSoft, padding: "40px 0", textAlign: "center" }}>
+          {emptyMsg || "No requests found."}
+        </div>
+      ) : (
+        <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px" }}>
+          <RequestTable requests={filtered} onOpen={onOpen} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= REQUEST DETAIL ================= */
+function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, requests, updateRequest, pushHistory, showToast }) {
+  const applicant = userById(req.applicantId);
+  const [comment, setComment] = useState("");
+  const [vehicleId, setVehicleId] = useState(req.vehicleId || "");
+  const [driverId, setDriverId] = useState(req.driverId || "");
+  const [meter, setMeter] = useState(req.meter || "");
+  const [observation, setObservation] = useState(req.observation || "");
+  const [finalRemarks, setFinalRemarks] = useState("");
+
+  const conflict = useMemo(() => {
+    if (!vehicleId) return null;
+    return requests.find((r) =>
+      r.id !== req.id && r.vehicleId === vehicleId &&
+      [STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW, STATUS.APPROVED].includes(r.status) &&
+      overlaps(req.start, req.end, r.start, r.end)
+    );
+  }, [vehicleId, requests, req]);
+
+  const driverConflict = useMemo(() => {
+    if (!driverId) return null;
+    return requests.find((r) =>
+      r.id !== req.id && r.driverId === driverId &&
+      [STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW, STATUS.APPROVED].includes(r.status) &&
+      overlaps(req.start, req.end, r.start, r.end)
+    );
+  }, [driverId, requests, req]);
+
+  const isOwnRequest = applicant.id === currentUser.id;
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: COLORS.greenSoft, fontFamily: SANS, fontSize: 13, fontWeight: 600, padding: 0, marginBottom: 16 }}>
+        <ChevronRight size={15} style={{ transform: "rotate(180deg)" }} /> Back to list
+      </button>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontFamily: SANS, fontSize: 11.5, color: COLORS.inkSoft, letterSpacing: 0.3 }}>MOYAS-F07</div>
+          <h1 style={{ fontFamily: SERIF, fontSize: 24, margin: "2px 0 0", fontWeight: 700 }}>{req.id}</h1>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Badge status={req.status} />
+          <Btn variant="ghost" small icon={Printer}>Print / PDF</Btn>
+        </div>
+      </div>
+
+      {/* Workflow tracker */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 24, fontFamily: SANS, fontSize: 11 }}>
+        {WORKFLOW_ORDER.map((s, i) => {
+          const currentIdx = WORKFLOW_ORDER.indexOf(req.status);
+          const done = currentIdx >= 0 && i <= currentIdx && ![STATUS.REJECTED, STATUS.RETURNED, STATUS.CANCELLED].includes(req.status);
+          const isRejectedPath = [STATUS.REJECTED, STATUS.RETURNED, STATUS.CANCELLED].includes(req.status);
+          return (
+            <div key={s} style={{
+              padding: "5px 9px", borderRadius: 3, whiteSpace: "nowrap",
+              background: done ? COLORS.green : "#fff",
+              color: done ? "#fff" : COLORS.inkSoft,
+              border: `1px solid ${done ? COLORS.green : COLORS.line}`,
+              opacity: isRejectedPath && !done ? 0.4 : 1,
+            }}>
+              {s}
+            </div>
+          );
+        })}
+        {[STATUS.REJECTED, STATUS.RETURNED, STATUS.CANCELLED].includes(req.status) && (
+          <div style={{ padding: "5px 9px", borderRadius: 3, background: COLORS.red, color: "#fff" }}>{req.status}</div>
+        )}
+      </div>
+
+      {/* Section A */}
+      <SectionCard label="Section A" title="Applicant Information">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 14 }}>
+          <Field label="Applicant Name"><div>{applicant.name}</div></Field>
+          <Field label="Officer / Designation"><div>{applicant.designation}</div></Field>
+          <Field label="Division / Section"><div>{req.division}</div></Field>
+          <Field label="Purpose"><div>{req.purpose}</div></Field>
+        </div>
+      </SectionCard>
+
+      {/* Section B */}
+      <SectionCard label="Section B" title="Journey Information">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 14 }}>
+          <Field label="Destination"><div>{req.destination}</div></Field>
+          <Field label="Journey Type"><div>{req.journeyType}</div></Field>
+          <Field label="Starting Date/Time"><div>{fmtDT(req.start)}</div></Field>
+          <Field label="Ending Date/Time"><div>{fmtDT(req.end)}</div></Field>
+        </div>
+      </SectionCard>
+
+      {/* Section C */}
+      <SectionCard label="Section C" title="Travelling Officers">
+        {req.officers.map((o, i) => (
+          <div key={i} style={{ display: "flex", gap: 20, padding: "8px 0", borderBottom: i < req.officers.length - 1 ? `1px solid ${COLORS.line}` : "none", fontSize: 13.5, flexWrap: "wrap" }}>
+            <div style={{ flex: 1 }}><strong>{o.name}</strong></div>
+            <div style={{ flex: 1, color: COLORS.inkSoft }}>{o.designation}</div>
+            <div style={{ flex: 1, color: COLORS.inkSoft }}>{o.dept}</div>
+          </div>
+        ))}
+      </SectionCard>
+
+      {/* Section D */}
+      <SectionCard label="Section D" title="Approval Information">
+        <Field label="Adequate space available for approval?"><div>{req.adequateSpace}</div></Field>
+      </SectionCard>
+
+      {/* History / audit trail */}
+      <SectionCard label="History" title="Approval History & Audit Trail">
+        {req.history.map((h, i) => (
+          <div key={i} style={{ display: "flex", gap: 12, padding: "9px 0", borderBottom: i < req.history.length - 1 ? `1px solid ${COLORS.line}` : "none" }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.green, marginTop: 6, flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>{h.action}</div>
+              <div style={{ fontSize: 12, color: COLORS.inkSoft }}>{h.who} · {fmtDT(h.at)}</div>
+              {h.comment && <div style={{ fontSize: 12.5, color: COLORS.ink, marginTop: 3, fontStyle: "italic" }}>"{h.comment}"</div>}
+            </div>
+          </div>
+        ))}
+      </SectionCard>
+
+      {/* -------- ROLE-SPECIFIC ACTION PANELS -------- */}
+      {roleKey === "division_head" && req.status === STATUS.SUBMITTED && req.division === currentUser.division && (
+        <SectionCard label="Action" title="Division Head Review">
+          {isOwnRequest && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", background: COLORS.redBg, color: COLORS.red, padding: "9px 12px", borderRadius: 3, fontSize: 12.5, marginBottom: 14 }}>
+              <AlertTriangle size={15} /> You cannot approve your own request.
+            </div>
+          )}
+          <Field label="Comments"><TextArea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Optional remarks" /></Field>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Btn icon={CheckCircle2} disabled={isOwnRequest} onClick={() => {
+              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.DIVISION_APPROVED }, "Approved (Division Head)", comment));
+              showToast(`${req.id} approved and routed to Vehicle Division.`);
+              onBack();
+            }}>Approve</Btn>
+            <Btn variant="danger" icon={XCircle} disabled={isOwnRequest} onClick={() => {
+              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.REJECTED }, "Rejected (Division Head)", comment));
+              showToast(`${req.id} rejected.`);
+              onBack();
+            }}>Reject</Btn>
+            <Btn variant="ghost" icon={ArrowLeftRight} disabled={isOwnRequest} onClick={() => {
+              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.RETURNED }, "Returned for correction", comment));
+              showToast(`${req.id} returned to applicant for correction.`);
+              onBack();
+            }}>Return for Correction</Btn>
+          </div>
+        </SectionCard>
+      )}
+
+      {roleKey === "transport_officer" && req.status === STATUS.DIVISION_APPROVED && (
+        <SectionCard label="Action" title="Vehicle Division — Assignment">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))", gap: 14 }}>
+            <Field label="Assign Vehicle">
+              <Select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
+                <option value="">Select a vehicle…</option>
+                {vehicles.map((v) => (
+                  <option key={v.id} value={v.id} disabled={v.status !== "Available"}>
+                    {v.reg} — {v.model} {v.status !== "Available" ? `(${v.status})` : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Assign Driver">
+              <Select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
+                <option value="">Select a driver…</option>
+                {drivers.map((d) => (
+                  <option key={d.id} value={d.id} disabled={d.status !== "Active"}>
+                    {d.name} {d.status !== "Active" ? `(${d.status})` : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Current Meter Reading (km)">
+              <Input type="number" value={meter} onChange={(e) => setMeter(e.target.value)} placeholder="e.g. 42000" />
+            </Field>
+          </div>
+          {conflict && (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.redBg, color: COLORS.red, padding: "9px 12px", borderRadius: 3, fontSize: 12.5, marginBottom: 14 }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>This vehicle is already booked for <strong>{conflict.id}</strong> ({fmtDT(conflict.start)} – {fmtDT(conflict.end)}). Choose another vehicle.</div>
+            </div>
+          )}
+          {driverConflict && (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.redBg, color: COLORS.red, padding: "9px 12px", borderRadius: 3, fontSize: 12.5, marginBottom: 14 }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>This driver is already assigned to <strong>{driverConflict.id}</strong> during an overlapping period.</div>
+            </div>
+          )}
+          <Field label="Transport Officer Observation"><TextArea value={observation} onChange={(e) => setObservation(e.target.value)} placeholder="Vehicle condition, fuel level, etc." /></Field>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Btn
+              icon={Truck}
+              disabled={!vehicleId || !driverId || !meter || !!conflict || !!driverConflict}
+              onClick={() => {
+                updateRequest(req.id, (r) => pushHistory(
+                  { ...r, status: STATUS.VEHICLE_ASSIGNED, vehicleId, driverId, meter: Number(meter), observation },
+                  "Vehicle & driver assigned"
+                ));
+                showToast(`${req.id} routed to final approval.`);
+                onBack();
+              }}
+            >
+              Confirm Assignment
+            </Btn>
+            <Btn variant="danger" icon={XCircle} onClick={() => {
+              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.UNAVAILABLE }, "Marked vehicle unavailable", observation));
+              showToast(`${req.id} marked as vehicle unavailable.`);
+              onBack();
+            }}>No Vehicle Available</Btn>
+          </div>
+        </SectionCard>
+      )}
+
+      {(req.vehicleId || req.status === STATUS.VEHICLE_ASSIGNED || req.status === STATUS.FINAL_REVIEW || req.status === STATUS.APPROVED || req.status === STATUS.COMPLETED) && (
+        <SectionCard label="Vehicle Division" title="Vehicle & Driver Allocation">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 14 }}>
+            <Field label="Vehicle">
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <Truck size={14} color={COLORS.greenSoft} />
+                {req.vehicleId ? `${vehicleById(req.vehicleId).reg} — ${vehicleById(req.vehicleId).model}` : "—"}
+              </div>
+            </Field>
+            <Field label="Driver">
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <User size={14} color={COLORS.greenSoft} />
+                {req.driverId ? driverById(req.driverId).name : "—"}
+              </div>
+            </Field>
+            <Field label="Meter Reading">
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <Gauge size={14} color={COLORS.greenSoft} />
+                {req.meter ? `${req.meter.toLocaleString()} km` : "—"}
+              </div>
+            </Field>
+          </div>
+          {req.observation && <Field label="Observation"><div style={{ fontStyle: "italic", color: COLORS.inkSoft }}>{req.observation}</div></Field>}
+        </SectionCard>
+      )}
+
+      {roleKey === "final_approver" && req.status === STATUS.VEHICLE_ASSIGNED && (
+        <SectionCard label="Action" title="Final Approval">
+          <div style={{ fontFamily: SERIF, fontSize: 15, marginBottom: 14, color: COLORS.ink, fontStyle: "italic" }}>
+            &ldquo;I approve / do not approve providing a vehicle for the above observation.&rdquo;
+          </div>
+          <Field label="Remarks"><TextArea value={finalRemarks} onChange={(e) => setFinalRemarks(e.target.value)} placeholder="Optional remarks" /></Field>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Btn icon={ShieldCheck} onClick={() => {
+              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.APPROVED }, "Final approval granted", finalRemarks));
+              showToast(`${req.id} approved — vehicle allocated.`);
+              onBack();
+            }}>Approve</Btn>
+            <Btn variant="danger" icon={XCircle} onClick={() => {
+              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.REJECTED }, "Rejected at final approval", finalRemarks));
+              showToast(`${req.id} rejected at final approval.`);
+              onBack();
+            }}>Reject</Btn>
+          </div>
+        </SectionCard>
+      )}
+
+      {roleKey === "transport_officer" && req.status === STATUS.APPROVED && (
+        <SectionCard label="Action" title="Mark Trip Completed">
+          <Btn icon={CheckCircle2} onClick={() => {
+            updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.COMPLETED }, "Trip marked completed"));
+            showToast(`${req.id} marked completed.`);
+            onBack();
+          }}>Mark as Completed</Btn>
+        </SectionCard>
+      )}
+
+      {roleKey === "applicant" && isOwnRequest && [STATUS.SUBMITTED, STATUS.DIVISION_REVIEW].includes(req.status) && (
+        <SectionCard label="Action" title="Applicant Actions">
+          <Btn variant="danger" icon={Trash2} onClick={() => {
+            updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.CANCELLED }, "Cancelled by applicant"));
+            showToast(`${req.id} cancelled.`);
+            onBack();
+          }}>Cancel Request</Btn>
+        </SectionCard>
+      )}
+    </div>
+  );
+}
+
+/* ================= NEW REQUEST MODAL ================= */
+function NewRequestModal({ currentUser, onClose, onSubmit }) {
+  const [purpose, setPurpose] = useState("");
+  const [destination, setDestination] = useState("");
+  const [journeyType, setJourneyType] = useState("Local");
+  const [startDate, setStartDate] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [adequateSpace, setAdequateSpace] = useState("Yes");
+  const [officers, setOfficers] = useState([{ name: currentUser.name, designation: currentUser.designation, dept: currentUser.division }]);
+  const [declared, setDeclared] = useState(false);
+  const [error, setError] = useState("");
+
+  function addOfficer() {
+    if (officers.length >= 8) return;
+    setOfficers([...officers, { name: "", designation: "", dept: "" }]);
+  }
+  function updateOfficer(i, field, val) {
+    setOfficers(officers.map((o, idx) => (idx === i ? { ...o, [field]: val } : o)));
+  }
+  function removeOfficer(i) {
+    setOfficers(officers.filter((_, idx) => idx !== i));
+  }
+  function submit() {
+    setError("");
+    if (!purpose || !destination || !startDate || !startTime || !endDate || !endTime) {
+      setError("Please complete all required fields.");
+      return;
+    }
+    const start = `${startDate}T${startTime}`;
+    const end = `${endDate}T${endTime}`;
+    if (new Date(end) <= new Date(start)) {
+      setError("Ending date/time cannot be earlier than or equal to the starting date/time.");
+      return;
+    }
+    if (!declared) {
+      setError("Please confirm the applicant declaration before submitting.");
+      return;
+    }
+    const id = `REQ-2026-0${Math.floor(150 + Math.random() * 800)}`;
+    onSubmit({
+      id, applicantId: currentUser.id, division: currentUser.division,
+      purpose, destination, journeyType, start, end, adequateSpace,
+      officers: officers.filter((o) => o.name),
+      status: STATUS.SUBMITTED,
+      history: [{ who: currentUser.name, action: "Submitted request", at: new Date().toISOString() }],
+      vehicleId: null, driverId: null, meter: null, observation: "",
+    });
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,22,.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 16px", zIndex: 2000 }}>
+      <div style={{ background: "#fff", borderRadius: 5, width: "100%", maxWidth: 720, marginBottom: 40 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
+          <div>
+            <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.inkSoft }}>MOYAS-F07</div>
+            <h2 style={{ fontFamily: SERIF, fontSize: 19, margin: 0 }}>New Vehicle Request</h2>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.ink }}><Truck style={{ display: "none" }} /><span style={{ fontSize: 20, lineHeight: 1 }}>×</span></button>
+        </div>
+        <div style={{ padding: 22 }}>
+          <SectionCard label="Section A" title="Applicant Information">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 14 }}>
+              <Field label="Applicant Name"><Input value={currentUser.name} disabled /></Field>
+              <Field label="Officer / Designation"><Input value={currentUser.designation} disabled /></Field>
+              <Field label="Division / Section"><Input value={currentUser.division} disabled /></Field>
+            </div>
+            <Field label="Purpose for which vehicle is required *">
+              <TextArea value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="Describe the purpose of travel" />
+            </Field>
+          </SectionCard>
+
+          <SectionCard label="Section B" title="Journey Information">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 14 }}>
+              <Field label="Place to which vehicle should travel *"><Input value={destination} onChange={(e) => setDestination(e.target.value)} /></Field>
+              <Field label="Journey Type *">
+                <Select value={journeyType} onChange={(e) => setJourneyType(e.target.value)}>
+                  <option>Local</option>
+                  <option>External</option>
+                </Select>
+              </Field>
+              <Field label="Starting Date *"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
+              <Field label="Starting Time *"><Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></Field>
+              <Field label="Ending Date *"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
+              <Field label="Ending Time *"><Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} /></Field>
+            </div>
+          </SectionCard>
+
+          <SectionCard label="Section C" title="Travelling Officers" right={<Btn small variant="ghost" icon={Plus} onClick={addOfficer}>Add Officer</Btn>}>
+            {officers.map((o, i) => (
+              <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <Input placeholder="Officer name" value={o.name} onChange={(e) => updateOfficer(i, "name", e.target.value)} style={{ flex: "1 1 160px" }} />
+                <Input placeholder="Designation" value={o.designation} onChange={(e) => updateOfficer(i, "designation", e.target.value)} style={{ flex: "1 1 160px" }} />
+                <Input placeholder="Department" value={o.dept} onChange={(e) => updateOfficer(i, "dept", e.target.value)} style={{ flex: "1 1 160px" }} />
+                {officers.length > 1 && (
+                  <button onClick={() => removeOfficer(i)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red, display: "flex" }}>
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </SectionCard>
+
+          <SectionCard label="Section D" title="Approval Information">
+            <Field label="Is there adequate space for approval?">
+              <div style={{ display: "flex", gap: 16 }}>
+                {["Yes", "No"].map((opt) => (
+                  <label key={opt} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5 }}>
+                    <input type="radio" checked={adequateSpace === opt} onChange={() => setAdequateSpace(opt)} /> {opt}
+                  </label>
+                ))}
+              </div>
+            </Field>
+          </SectionCard>
+
+          <SectionCard label="Section E" title="Applicant Declaration">
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13.5 }}>
+              <input type="checkbox" checked={declared} onChange={(e) => setDeclared(e.target.checked)} style={{ marginTop: 3 }} />
+              I declare that the information provided above is true and correct to the best of my knowledge.
+            </label>
+          </SectionCard>
+
+          {error && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", background: COLORS.redBg, color: COLORS.red, padding: "9px 12px", borderRadius: 3, fontSize: 12.5, marginBottom: 14 }}>
+              <AlertTriangle size={15} /> {error}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+            <Btn onClick={submit}>Submit Request</Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= VEHICLES PANEL ================= */
+function VehiclePanel({ vehicles, requests }) {
+  const statusColor = { Available: COLORS.green, Maintenance: COLORS.amber, Assigned: COLORS.blueGrey };
+  return (
+    <div>
+      <PageHeader title="Vehicles" subtitle={`${vehicles.length} vehicles registered`} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px,1fr))", gap: 14 }}>
+        {vehicles.map((v) => {
+          const active = requests.find((r) => r.vehicleId === v.id && [STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW, STATUS.APPROVED].includes(r.status));
+          return (
+            <div key={v.id} style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Truck size={18} color={COLORS.greenSoft} />
+                  <div style={{ fontFamily: SERIF, fontWeight: 600, fontSize: 15 }}>{v.reg}</div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: statusColor[v.status] || COLORS.inkSoft }}>{v.status}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 8 }}>{v.type} · {v.model}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: COLORS.inkSoft, marginTop: 6 }}>
+                <Gauge size={13} /> {v.meter.toLocaleString()} km
+              </div>
+              {active && <div style={{ fontSize: 11.5, marginTop: 8, color: COLORS.blueGrey }}>Currently on {active.id}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ================= DRIVERS PANEL ================= */
+function DriverPanel({ drivers, requests }) {
+  return (
+    <div>
+      <PageHeader title="Drivers" subtitle={`${drivers.length} drivers registered`} />
+      <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px", overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
+          <thead>
+            <tr style={{ background: COLORS.paperDark, borderBottom: `1px solid ${COLORS.line}` }}>
+              {["Name", "Employee No.", "Contact", "License", "Expiry", "Status"].map((h) => (
+                <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11.5, color: COLORS.inkSoft }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {drivers.map((d) => (
+              <tr key={d.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                <td style={{ padding: "10px 12px", fontWeight: 600 }}>{d.name}</td>
+                <td style={{ padding: "10px 12px" }}>{d.empNo}</td>
+                <td style={{ padding: "10px 12px" }}>{d.contact}</td>
+                <td style={{ padding: "10px 12px" }}>{d.license}</td>
+                <td style={{ padding: "10px 12px" }}>{fmtD(d.expiry)}</td>
+                <td style={{ padding: "10px 12px" }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: d.status === "Active" ? COLORS.green : COLORS.amber }}>{d.status}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ================= SCHEDULE PANEL ================= */
+function SchedulePanel({ requests }) {
+  const scheduled = requests.filter((r) => r.vehicleId).sort((a, b) => new Date(a.start) - new Date(b.start));
+  return (
+    <div>
+      <PageHeader title="Vehicle Schedule" subtitle="All confirmed and pending vehicle bookings" />
+      <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px" }}>
+        {scheduled.length === 0 ? (
+          <div style={{ padding: 30, textAlign: "center", color: COLORS.inkSoft, fontSize: 13.5 }}>No scheduled trips.</div>
+        ) : scheduled.map((r) => {
+          const v = vehicleById(r.vehicleId);
+          const d = driverById(r.driverId);
+          return (
+            <div key={r.id} style={{ display: "flex", gap: 16, alignItems: "center", padding: "12px 0", borderBottom: `1px solid ${COLORS.line}`, flexWrap: "wrap" }}>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: STATUS_STYLE(r.status).fg }} />
+              <div style={{ minWidth: 110, fontWeight: 600, fontSize: 13 }}>{r.id}</div>
+              <div style={{ flex: "1 1 140px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}><Truck size={13} color={COLORS.greenSoft} /> {v ? v.reg : "—"}</div>
+              <div style={{ flex: "1 1 120px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}><User size={13} color={COLORS.greenSoft} /> {d ? d.name : "—"}</div>
+              <div style={{ flex: "1 1 160px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>{fmtDT(r.start)}</div>
+              <div style={{ flex: "1 1 220px", fontSize: 12.5, color: COLORS.inkSoft }}>{r.destination}</div>
+              <Badge status={r.status} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ================= USERS PANEL ================= */
+function UsersPanel() {
+  return (
+    <div>
+      <PageHeader title="Users" subtitle={`${USERS.length} accounts`} />
+      <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px", overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
+          <thead>
+            <tr style={{ background: COLORS.paperDark, borderBottom: `1px solid ${COLORS.line}` }}>
+              {["Name", "Designation", "Division", "Role", "Username"].map((h) => (
+                <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11.5, color: COLORS.inkSoft }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {USERS.map((u) => (
+              <tr key={u.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                <td style={{ padding: "10px 12px", fontWeight: 600 }}>{u.name}</td>
+                <td style={{ padding: "10px 12px" }}>{u.designation}</td>
+                <td style={{ padding: "10px 12px" }}>{u.division}</td>
+                <td style={{ padding: "10px 12px" }}>{ROLE_LABEL[u.role]}</td>
+                <td style={{ padding: "10px 12px", fontFamily: "monospace", fontSize: 12.5 }}>{u.username}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ================= AUDIT PANEL ================= */
+function AuditPanel({ requests }) {
+  const entries = requests
+    .flatMap((r) => r.history.map((h) => ({ ...h, reqId: r.id })))
+    .sort((a, b) => new Date(b.at) - new Date(a.at));
+  return (
+    <div>
+      <PageHeader title="Audit Log" subtitle="Complete history of actions across all requests" />
+      <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px" }}>
+        {entries.map((e, i) => (
+          <div key={i} style={{ display: "flex", gap: 14, padding: "11px 16px", borderBottom: i < entries.length - 1 ? `1px solid ${COLORS.line}` : "none", flexWrap: "wrap", fontSize: 13 }}>
+            <div style={{ minWidth: 130, color: COLORS.inkSoft, fontSize: 12 }}>{fmtDT(e.at)}</div>
+            <div style={{ minWidth: 110, fontWeight: 600 }}>{e.reqId}</div>
+            <div style={{ minWidth: 130 }}>{e.who}</div>
+            <div style={{ flex: 1, color: COLORS.inkSoft }}>{e.action}{e.comment ? ` — "${e.comment}"` : ""}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
