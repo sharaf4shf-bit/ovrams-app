@@ -102,6 +102,51 @@ const DRIVERS_SEED = [
   { id: "d3", name: "L. Rathnayake", empNo: "DRV-0041", contact: "070-9988776", license: "B3344556", expiry: "2027-01-18", status: "On Leave" },
 ];
 
+/* ---------------- Supabase <-> app data mapping ----------------
+   The database uses snake_case columns and separate tables for
+   officers/history; the rest of the app expects the original
+   camelCase shape used by REQUESTS_SEED. These helpers translate
+   both ways so the rest of the app doesn't need to change. */
+function dbRequestToApp(row, officersRows, historyRows) {
+  return {
+    id: row.id,
+    applicantId: row.applicant_id,
+    division: row.division,
+    purpose: row.purpose,
+    destination: row.destination,
+    journeyType: row.journey_type,
+    start: row.start_time,
+    end: row.end_time,
+    officers: (officersRows || [])
+      .filter((o) => o.request_id === row.id)
+      .map((o) => ({ name: o.name, designation: o.designation, dept: o.dept })),
+    adequateSpace: row.adequate_space,
+    status: row.status,
+    history: (historyRows || [])
+      .filter((h) => h.request_id === row.id)
+      .sort((a, b) => new Date(a.at) - new Date(b.at))
+      .map((h) => ({ who: h.who, action: h.action, at: h.at, comment: h.comment })),
+    vehicleId: row.vehicle_id,
+    driverId: row.driver_id,
+    meter: row.meter,
+    observation: row.observation,
+  };
+}
+
+async function loadRequestsFromDb() {
+  const [{ data: reqRows, error: reqErr }, { data: offRows, error: offErr }, { data: histRows, error: histErr }] =
+    await Promise.all([
+      supabase.from("requests").select("*").order("created_at", { ascending: false }),
+      supabase.from("request_officers").select("*"),
+      supabase.from("request_history").select("*"),
+    ]);
+  if (reqErr || offErr || histErr) {
+    console.error(reqErr || offErr || histErr);
+    return { data: null, error: reqErr || offErr || histErr };
+  }
+  return { data: reqRows.map((r) => dbRequestToApp(r, offRows, histRows)), error: null };
+}
+
 const REQUESTS_SEED = [
   {
     id: "REQ-2026-0142", applicantId: "u1", division: "Administration",
@@ -208,7 +253,14 @@ function fmtD(s) {
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return new Date(aStart) < new Date(bEnd) && new Date(bStart) < new Date(aEnd);
 }
-function userById(id) { return USERS.find((u) => u.id === id); }
+/* userById resolves against the hardcoded USERS array. Since real request
+   data now stores Supabase UUIDs as applicantId, we match on username first
+   (found via the id passed in, which is now a UUID matching an app_users
+   row loaded elsewhere) — see DB_USERS_BY_ID populated at runtime below. */
+let DB_USERS_BY_ID = {}; // uuid -> { id, username, name, ... } from app_users, filled in after login
+function userById(id) {
+  return DB_USERS_BY_ID[id] || USERS.find((u) => u.id === id);
+}
 function vehicleById(id) { return VEHICLES_SEED.find((v) => v.id === id); }
 function driverById(id) { return DRIVERS_SEED.find((d) => d.id === id); }
 
@@ -407,7 +459,7 @@ function LoginScreen({ onLogin }) {
 
     // Merge: use the database row as the source of truth for identity fields,
     // but keep the local `id` shape the rest of the app already expects.
-    onLogin({ ...localMatch, ...dbMatch, id: localMatch.id });
+    onLogin({ ...localMatch, ...dbMatch, id: dbMatch.id });
   }
 
   return (
@@ -536,14 +588,63 @@ export default function OVRAMS() {
   /* Added: session state. No one sees any page until authenticated. */
   const [session, setSession] = useState(null);
 
-  const [requests, setRequests] = useState(REQUESTS_SEED);
-  const [vehicles] = useState(VEHICLES_SEED);
-  const [drivers] = useState(DRIVERS_SEED);
+  const [requests, setRequests] = useState([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [vehicles, setVehicles] = useState(VEHICLES_SEED);
+  const [drivers, setDrivers] = useState(DRIVERS_SEED);
   const [page, setPage] = useState("dashboard");
   const [selectedReqId, setSelectedReqId] = useState(null);
   const [showNewRequest, setShowNewRequest] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [toast, setToast] = useState(null);
+
+  /* Load live data from Supabase once someone is logged in, and again
+     whenever they log in fresh. This replaces the old REQUESTS_SEED /
+     VEHICLES_SEED / DRIVERS_SEED in-memory-only data. */
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+
+    async function loadAll() {
+      setRequestsLoading(true);
+      const [reqResult, vehResult, drvResult, usersResult] = await Promise.all([
+        loadRequestsFromDb(),
+        supabase.from("vehicles").select("*"),
+        supabase.from("drivers").select("*"),
+        supabase.from("app_users").select("*"),
+      ]);
+      if (cancelled) return;
+
+      if (usersResult.data) {
+        DB_USERS_BY_ID = {};
+        usersResult.data.forEach((u) => {
+          DB_USERS_BY_ID[u.id] = {
+            id: u.id, name: u.name, designation: u.designation,
+            division: u.division, role: u.role, username: u.username,
+          };
+        });
+      }
+      if (reqResult.data) setRequests(reqResult.data);
+      if (vehResult.data) {
+        setVehicles(
+          vehResult.data.map((v) => ({
+            id: v.id, reg: v.reg, type: v.type, model: v.model, status: v.status, meter: v.meter,
+          }))
+        );
+      }
+      if (drvResult.data) {
+        setDrivers(
+          drvResult.data.map((d) => ({
+            id: d.id, name: d.name, empNo: d.emp_no, contact: d.contact,
+            license: d.license, expiry: d.expiry, status: d.status,
+          }))
+        );
+      }
+      setRequestsLoading(false);
+    }
+    loadAll();
+    return () => { cancelled = true; };
+  }, [session]);
 
   function showToast(msg) {
     setToast(msg);
@@ -555,8 +656,59 @@ export default function OVRAMS() {
       history: [...req.history, { who: session.name, action, at: new Date().toISOString(), comment }],
     };
   }
+  /* updateRequest now persists changes to Supabase (so every device sees
+     the same data) and only updates local state after the database write
+     succeeds. `updater` is the same pure function used before — it returns
+     the new shape of the request, including any newly appended history
+     entry from pushHistory(). */
   function updateRequest(id, updater) {
-    setRequests((rs) => rs.map((r) => (r.id === id ? updater(r) : r)));
+    setRequests((rs) => {
+      const current = rs.find((r) => r.id === id);
+      if (!current) return rs;
+      const updated = updater(current);
+
+      // Persist the request's own fields.
+      supabase
+        .from("requests")
+        .update({
+          status: updated.status,
+          vehicle_id: updated.vehicleId,
+          driver_id: updated.driverId,
+          meter: updated.meter,
+          observation: updated.observation,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Failed to save request update:", error);
+            showToast("Warning: change may not have saved. Check your connection.");
+          }
+        });
+
+      // Persist any newly appended history entry (there's at most one new
+      // entry per call, since updater() is only ever called once per action).
+      const newEntry = updated.history[updated.history.length - 1];
+      const alreadyHadIt = current.history.some(
+        (h) => h.at === newEntry.at && h.action === newEntry.action
+      );
+      if (newEntry && !alreadyHadIt) {
+        supabase
+          .from("request_history")
+          .insert({
+            request_id: id,
+            who: newEntry.who,
+            action: newEntry.action,
+            comment: newEntry.comment || null,
+            at: newEntry.at,
+          })
+          .then(({ error }) => {
+            if (error) console.error("Failed to save history entry:", error);
+          });
+      }
+
+      return rs.map((r) => (r.id === id ? updated : r));
+    });
   }
 
   function handleLogin(user) {
@@ -790,7 +942,48 @@ export default function OVRAMS() {
         <NewRequestModal
           currentUser={currentUser}
           onClose={() => setShowNewRequest(false)}
-          onSubmit={(newReq) => {
+          onSubmit={async (newReq) => {
+            // 1. Insert the main request row.
+            const { error: reqError } = await supabase.from("requests").insert({
+              id: newReq.id,
+              applicant_id: newReq.applicantId,
+              division: newReq.division,
+              purpose: newReq.purpose,
+              destination: newReq.destination,
+              journey_type: newReq.journeyType,
+              start_time: newReq.start,
+              end_time: newReq.end,
+              adequate_space: newReq.adequateSpace,
+              status: newReq.status,
+              vehicle_id: newReq.vehicleId,
+              driver_id: newReq.driverId,
+              meter: newReq.meter,
+              observation: newReq.observation,
+            });
+            if (reqError) {
+              console.error("Failed to save new request:", reqError);
+              showToast("Could not submit request — check your connection and try again.");
+              return;
+            }
+
+            // 2. Insert travelling officers.
+            if (newReq.officers.length) {
+              const { error: offError } = await supabase.from("request_officers").insert(
+                newReq.officers.map((o) => ({
+                  request_id: newReq.id, name: o.name, designation: o.designation, dept: o.dept,
+                }))
+              );
+              if (offError) console.error("Failed to save officers:", offError);
+            }
+
+            // 3. Insert the initial history entry.
+            const firstHistory = newReq.history[0];
+            const { error: histError } = await supabase.from("request_history").insert({
+              request_id: newReq.id, who: firstHistory.who, action: firstHistory.action, at: firstHistory.at,
+            });
+            if (histError) console.error("Failed to save history:", histError);
+
+            // 4. Update local state only after the database write succeeds.
             setRequests((rs) => [newReq, ...rs]);
             setShowNewRequest(false);
             showToast(`Request ${newReq.id} submitted for division review.`);
