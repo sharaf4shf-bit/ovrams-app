@@ -252,6 +252,12 @@ let DB_USERS_BY_ID = {};
 function userById(id) {
   return DB_USERS_BY_ID[id];
 }
+/* A Division Head account can either be scoped to one specific division
+   (division === that division's exact name) or be the shared account with
+   authority over all divisions (division === "All Divisions"). */
+function divisionHeadCanAct(user, requestDivision) {
+  return user.division === "All Divisions" || user.division === requestDivision;
+}
 /* vehicleById/driverById resolve against live Supabase-loaded arrays,
    populated at runtime (see DB_VEHICLES_BY_ID / DB_DRIVERS_BY_ID below),
    since request.vehicleId/driverId are now real database UUIDs rather
@@ -1469,7 +1475,7 @@ export default function OVRAMS() {
           ) : page === "approvals" ? (
             <RequestList
               title="Pending Division Approvals"
-              requests={requests.filter((r) => r.division === currentUser.division && r.status === STATUS.SUBMITTED)}
+              requests={requests.filter((r) => divisionHeadCanAct(currentUser, r.division) && r.status === STATUS.SUBMITTED)}
               onOpen={setSelectedReqId}
               emptyMsg="No requests awaiting your review."
             />
@@ -1824,7 +1830,7 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
       </SectionCard>
 
       {/* -------- ROLE-SPECIFIC ACTION PANELS -------- */}
-      {roleKey === "division_head" && req.status === STATUS.SUBMITTED && req.division === currentUser.division && (
+      {roleKey === "division_head" && req.status === STATUS.SUBMITTED && divisionHeadCanAct(currentUser, req.division) && (
         <SectionCard label="Action" title="Division Head Review">
           {isOwnRequest && (
             <div style={{ display: "flex", gap: 8, alignItems: "center", background: COLORS.redBg, color: COLORS.red, padding: "9px 12px", borderRadius: 3, fontSize: 12.5, marginBottom: 14 }}>
