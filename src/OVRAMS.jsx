@@ -261,8 +261,18 @@ let DB_USERS_BY_ID = {}; // uuid -> { id, username, name, ... } from app_users, 
 function userById(id) {
   return DB_USERS_BY_ID[id] || USERS.find((u) => u.id === id);
 }
-function vehicleById(id) { return VEHICLES_SEED.find((v) => v.id === id); }
-function driverById(id) { return DRIVERS_SEED.find((d) => d.id === id); }
+/* vehicleById/driverById resolve against live Supabase-loaded arrays,
+   populated at runtime (see DB_VEHICLES_BY_ID / DB_DRIVERS_BY_ID below),
+   since request.vehicleId/driverId are now real database UUIDs rather
+   than the old hardcoded seed ids. */
+let DB_VEHICLES_BY_ID = {};
+let DB_DRIVERS_BY_ID = {};
+function vehicleById(id) {
+  return DB_VEHICLES_BY_ID[id] || VEHICLES_SEED.find((v) => v.id === id);
+}
+function driverById(id) {
+  return DB_DRIVERS_BY_ID[id] || DRIVERS_SEED.find((d) => d.id === id);
+}
 
 /* ---------------- Small UI atoms ---------------- */
 function Badge({ status }) {
@@ -626,19 +636,21 @@ export default function OVRAMS() {
       }
       if (reqResult.data) setRequests(reqResult.data);
       if (vehResult.data) {
-        setVehicles(
-          vehResult.data.map((v) => ({
-            id: v.id, reg: v.reg, type: v.type, model: v.model, status: v.status, meter: v.meter,
-          }))
-        );
+        const mapped = vehResult.data.map((v) => ({
+          id: v.id, reg: v.reg, type: v.type, model: v.model, status: v.status, meter: v.meter,
+        }));
+        setVehicles(mapped);
+        DB_VEHICLES_BY_ID = {};
+        mapped.forEach((v) => { DB_VEHICLES_BY_ID[v.id] = v; });
       }
       if (drvResult.data) {
-        setDrivers(
-          drvResult.data.map((d) => ({
-            id: d.id, name: d.name, empNo: d.emp_no, contact: d.contact,
-            license: d.license, expiry: d.expiry, status: d.status,
-          }))
-        );
+        const mapped = drvResult.data.map((d) => ({
+          id: d.id, name: d.name, empNo: d.emp_no, contact: d.contact,
+          license: d.license, expiry: d.expiry, status: d.status,
+        }));
+        setDrivers(mapped);
+        DB_DRIVERS_BY_ID = {};
+        mapped.forEach((d) => { DB_DRIVERS_BY_ID[d.id] = d; });
       }
       setRequestsLoading(false);
     }
@@ -1166,7 +1178,7 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
     );
   }, [driverId, requests, req]);
 
-  const isOwnRequest = applicant.id === currentUser.id;
+  const isOwnRequest = applicant ? applicant.id === currentUser.id : false;
 
   return (
     <div>
@@ -1211,8 +1223,8 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
       {/* Section A */}
       <SectionCard label="Section A" title="Applicant Information">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 14 }}>
-          <Field label="Applicant Name"><div>{applicant.name}</div></Field>
-          <Field label="Officer / Designation"><div>{applicant.designation}</div></Field>
+          <Field label="Applicant Name"><div>{applicant ? applicant.name : "—"}</div></Field>
+          <Field label="Officer / Designation"><div>{applicant ? applicant.designation : "—"}</div></Field>
           <Field label="Division / Section"><div>{req.division}</div></Field>
           <Field label="Purpose"><div>{req.purpose}</div></Field>
         </div>
@@ -1357,13 +1369,15 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
             <Field label="Vehicle">
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <Truck size={14} color={COLORS.greenSoft} />
-                {req.vehicleId ? `${vehicleById(req.vehicleId).reg} — ${vehicleById(req.vehicleId).model}` : "—"}
+                {req.vehicleId && vehicleById(req.vehicleId)
+                  ? `${vehicleById(req.vehicleId).reg} — ${vehicleById(req.vehicleId).model}`
+                  : "—"}
               </div>
             </Field>
             <Field label="Driver">
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <User size={14} color={COLORS.greenSoft} />
-                {req.driverId ? driverById(req.driverId).name : "—"}
+                {req.driverId && driverById(req.driverId) ? driverById(req.driverId).name : "—"}
               </div>
             </Field>
             <Field label="Meter Reading">
