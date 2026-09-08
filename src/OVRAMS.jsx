@@ -68,17 +68,10 @@ const WORKFLOW_ORDER = [
 /* ---------------- Demo data ---------------- */
 const DIVISIONS = ["Administration", "Finance", "Engineering", "Human Resources", "Legal Affairs"];
 
-/* Added: username + password fields for the login system. Everything else
-   about USERS is unchanged from the original data model. */
-const USERS = [
-  { id: "u1", name: "R. Jayasuriya", designation: "Assistant Registrar", division: "Administration", role: "applicant", username: "rjayasuriya", password: "apply123" },
-  { id: "u2", name: "N. Fernando", designation: "Programme Officer", division: "Engineering", role: "applicant", username: "nfernando", password: "apply123" },
-  { id: "u3", name: "K. Wickramasinghe", designation: "Division Head, Administration", division: "Administration", role: "division_head", username: "kwickramasinghe", password: "head123" },
-  { id: "u4", name: "S. Perera", designation: "Division Head, Engineering", division: "Engineering", role: "division_head", username: "sperera", password: "head123" },
-  { id: "u5", name: "M. Bandara", designation: "Transport Officer", division: "Vehicle Division", role: "transport_officer", username: "mbandara", password: "transport123" },
-  { id: "u6", name: "A. Additional Secretary", designation: "Additional Secretary (Admin)", division: "Administration", role: "final_approver", username: "asecretary", password: "final123" },
-  { id: "u7", name: "System Administrator", designation: "System Administrator", division: "IT", role: "admin", username: "admin", password: "admin123" },
-];
+/* USERS (plaintext demo credentials) has been removed — Stage 1B replaced
+   it with real Supabase Auth. Identity data now lives in app_users (loaded
+   into DB_USERS_BY_ID at runtime), and passwords are handled entirely by
+   Supabase Auth, never stored or checked in this file. */
 
 const ROLE_LABEL = {
   applicant: "Applicant",
@@ -253,13 +246,11 @@ function fmtD(s) {
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return new Date(aStart) < new Date(bEnd) && new Date(bStart) < new Date(aEnd);
 }
-/* userById resolves against the hardcoded USERS array. Since real request
-   data now stores Supabase UUIDs as applicantId, we match on username first
-   (found via the id passed in, which is now a UUID matching an app_users
-   row loaded elsewhere) — see DB_USERS_BY_ID populated at runtime below. */
-let DB_USERS_BY_ID = {}; // uuid -> { id, username, name, ... } from app_users, filled in after login
+/* userById resolves against DB_USERS_BY_ID, populated at runtime from the
+   live app_users table (see the loadAll effect in the main app component). */
+let DB_USERS_BY_ID = {};
 function userById(id) {
-  return DB_USERS_BY_ID[id] || USERS.find((u) => u.id === id);
+  return DB_USERS_BY_ID[id];
 }
 /* vehicleById/driverById resolve against live Supabase-loaded arrays,
    populated at runtime (see DB_VEHICLES_BY_ID / DB_DRIVERS_BY_ID below),
@@ -422,56 +413,37 @@ function MiniBars({ data, colorFn }) {
   );
 }
 
-/* ================= LOGIN SCREEN ================= */
-/* One login form serving all five roles. The person selects their role,
-   which filters the account list and label shown, then authenticates
-   with a username + password matched against the USERS table. */
-function LoginScreen({ onLogin }) {
-  const [roleKey, setRoleKey] = useState("applicant");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+/* ================= AUTH SCREENS ================= */
+/* Stage 1B: real authentication via Supabase Auth.
+   - Applicants can sign up for their own account, or log in, or reset a
+     forgotten password.
+   - The four fixed-role accounts (Division Head, Transport Officer, Final
+     Approving Officer, System Administrator) are created once by an admin
+     directly in Supabase and never self-register; they can only log in or
+     reset a forgotten password.
+   Login is by username (not email) for a friendlier experience, so we
+   first look up the username's associated email in app_users, then hand
+   that email + the entered password to Supabase Auth to actually verify. */
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
+async function lookupEmailByUsername(username) {
+  const { data, error } = await supabase
+    .from("app_users")
+    .select("email, role")
+    .ilike("username", username.trim())
+    .maybeSingle();
+  if (error || !data) return null;
+  return data;
+}
 
-    // STAGE 1: identity (name/role/division) now comes from the live
-    // Supabase database instead of the hardcoded USERS array.
-    // Password checking here is still temporary/local — real hashed-password
-    // auth via Supabase Auth is a separate, later step (Stage 1B).
-    const { data, error: dbError } = await supabase
-      .from("app_users")
-      .select("*")
-      .eq("role", roleKey)
-      .ilike("username", username.trim());
+function AuthGate({ onLogin }) {
+  const [mode, setMode] = useState("login"); // 'login' | 'signup' | 'forgot'
 
-    setLoading(false);
+  if (mode === "signup") return <SignupScreen onDone={() => setMode("login")} onLogin={onLogin} />;
+  if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
+  return <LoginScreen onLogin={onLogin} onGoSignup={() => setMode("signup")} onGoForgot={() => setMode("forgot")} />;
+}
 
-    if (dbError) {
-      setError("Could not reach the database. Check your connection and try again.");
-      console.error(dbError);
-      return;
-    }
-
-    const dbMatch = data && data[0];
-    const localMatch = USERS.find(
-      (u) => u.role === roleKey && u.username.toLowerCase() === username.trim().toLowerCase()
-    );
-
-    if (!dbMatch || !localMatch || localMatch.password !== password) {
-      setError("Incorrect username or password for the selected role.");
-      return;
-    }
-
-    // Merge: use the database row as the source of truth for identity fields,
-    // but keep the local `id` shape the rest of the app already expects.
-    onLogin({ ...localMatch, ...dbMatch, id: dbMatch.id });
-  }
-
+function AuthShell({ title, children }) {
   return (
     <div style={{
       fontFamily: SANS, background: COLORS.paper, minHeight: "100vh",
@@ -495,101 +467,337 @@ function LoginScreen({ onLogin }) {
             Vehicle Request &amp; Approval Management System
           </div>
         </div>
-
         <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 5, overflow: "hidden" }}>
-          <div style={{ padding: "18px 24px 8px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <div style={{ padding: "18px 24px 16px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <Lock size={15} color={COLORS.greenSoft} />
               <h2 style={{ fontFamily: SERIF, fontSize: 17, margin: 0, color: COLORS.ink, fontWeight: 600 }}>
-                Officer Log In
+                {title}
               </h2>
             </div>
-            <div style={{ fontFamily: SANS, fontSize: 11.5, color: COLORS.inkSoft, marginBottom: 10 }}>
-              Select your role
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
-              {Object.keys(ROLE_LABEL).map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => { setRoleKey(r); setError(""); }}
-                  style={{
-                    fontSize: 11.5, fontFamily: SANS, fontWeight: 600, whiteSpace: "nowrap",
-                    padding: "6px 11px", borderRadius: 3, cursor: "pointer",
-                    border: `1px solid ${roleKey === r ? COLORS.green : COLORS.line}`,
-                    background: roleKey === r ? COLORS.green : "#fff",
-                    color: roleKey === r ? "#fff" : COLORS.ink,
-                  }}
-                >
-                  {ROLE_LABEL[r]}
-                </button>
-              ))}
-            </div>
           </div>
-
-          <form onSubmit={handleSubmit} style={{ padding: 24 }}>
-            <Field label="Username">
-              <Input
-                autoFocus
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. rjayasuriya"
-              />
-            </Field>
-            <Field label="Password">
-              <div style={{ position: "relative" }}>
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter password"
-                  style={{ paddingRight: 38 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  style={{
-                    position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
-                    background: "none", border: "none", cursor: "pointer", color: COLORS.inkSoft,
-                    display: "flex", alignItems: "center", padding: 4,
-                  }}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </Field>
-
-            {error && (
-              <div style={{
-                display: "flex", gap: 8, alignItems: "center", background: COLORS.redBg,
-                color: COLORS.red, padding: "9px 12px", borderRadius: 3, fontSize: 12.5,
-                marginBottom: 14, fontFamily: SANS,
-              }}>
-                <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {error}
-              </div>
-            )}
-
-            <Btn type="submit" onClick={handleSubmit} icon={Lock} disabled={loading}>
-              {loading ? "Checking…" : `Log In as ${ROLE_LABEL[roleKey]}`}
-            </Btn>
-
-            <div style={{
-              marginTop: 18, paddingTop: 14, borderTop: `1px solid ${COLORS.line}`,
-              fontFamily: SANS, fontSize: 11.5, color: COLORS.inkSoft, lineHeight: 1.6,
-            }}>
-              Demo credentials for {ROLE_LABEL[roleKey]}:
-              <br />
-              {USERS.filter((u) => u.role === roleKey).map((u) => (
-                <span key={u.id} style={{ display: "block" }}>
-                  {u.name} — <strong>{u.username}</strong> / <strong>{u.password}</strong>
-                </span>
-              ))}
-            </div>
-          </form>
+          <div style={{ padding: 24 }}>{children}</div>
         </div>
       </div>
     </div>
+  );
+}
+
+function ErrorBanner({ children }) {
+  if (!children) return null;
+  return (
+    <div style={{
+      display: "flex", gap: 8, alignItems: "center", background: COLORS.redBg,
+      color: COLORS.red, padding: "9px 12px", borderRadius: 3, fontSize: 12.5,
+      marginBottom: 14, fontFamily: SANS,
+    }}>
+      <AlertTriangle size={14} style={{ flexShrink: 0 }} /> {children}
+    </div>
+  );
+}
+function SuccessBanner({ children }) {
+  if (!children) return null;
+  return (
+    <div style={{
+      display: "flex", gap: 8, alignItems: "center", background: "#eaf6ec",
+      color: COLORS.green, padding: "9px 12px", borderRadius: 3, fontSize: 12.5,
+      marginBottom: 14, fontFamily: SANS,
+    }}>
+      <CheckCircle2 size={14} style={{ flexShrink: 0 }} /> {children}
+    </div>
+  );
+}
+
+function PasswordField({ value, onChange, placeholder, autoFocus }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <Input
+        autoFocus={autoFocus}
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder || "Enter password"}
+        style={{ paddingRight: 38 }}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((v) => !v)}
+        style={{
+          position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+          background: "none", border: "none", cursor: "pointer", color: COLORS.inkSoft,
+          display: "flex", alignItems: "center", padding: 4,
+        }}
+        aria-label={show ? "Hide password" : "Show password"}
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin, onGoSignup, onGoForgot }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!username.trim() || !password) {
+      setError("Enter your username and password.");
+      return;
+    }
+    setLoading(true);
+
+    const lookup = await lookupEmailByUsername(username);
+    if (!lookup || !lookup.email) {
+      setLoading(false);
+      setError("Incorrect username or password.");
+      return;
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: lookup.email,
+      password,
+    });
+
+    if (authError || !authData.user) {
+      setLoading(false);
+      setError("Incorrect username or password.");
+      return;
+    }
+
+    // Fetch the full profile row to pass into the app.
+    const { data: profile, error: profileError } = await supabase
+      .from("app_users")
+      .select("*")
+      .eq("auth_id", authData.user.id)
+      .maybeSingle();
+
+    setLoading(false);
+
+    if (profileError || !profile) {
+      setError("Your account could not be found. Contact the system administrator.");
+      return;
+    }
+
+    onLogin(profile);
+  }
+
+  return (
+    <AuthShell title="Log In">
+      <form onSubmit={handleSubmit}>
+        <Field label="Username">
+          <Input
+            autoFocus
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="e.g. rjayasuriya"
+          />
+        </Field>
+        <Field label="Password">
+          <PasswordField value={password} onChange={(e) => setPassword(e.target.value)} />
+        </Field>
+
+        <ErrorBanner>{error}</ErrorBanner>
+
+        <Btn type="submit" onClick={handleSubmit} icon={Lock} disabled={loading}>
+          {loading ? "Checking…" : "Log In"}
+        </Btn>
+
+        <div style={{
+          marginTop: 16, display: "flex", justifyContent: "space-between",
+          fontFamily: SANS, fontSize: 12.5,
+        }}>
+          <button type="button" onClick={onGoForgot} style={{ background: "none", border: "none", color: COLORS.greenSoft, cursor: "pointer", padding: 0, fontFamily: SANS, fontSize: 12.5 }}>
+            Forgot password?
+          </button>
+          <button type="button" onClick={onGoSignup} style={{ background: "none", border: "none", color: COLORS.greenSoft, cursor: "pointer", padding: 0, fontFamily: SANS, fontSize: 12.5 }}>
+            New applicant? Create an account
+          </button>
+        </div>
+      </form>
+    </AuthShell>
+  );
+}
+
+function SignupScreen({ onDone, onLogin }) {
+  const [name, setName] = useState("");
+  const [designation, setDesignation] = useState("");
+  const [division, setDivision] = useState("");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+
+    if (!name.trim() || !username.trim() || !email.trim() || !password) {
+      setError("Please fill in all required fields.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+
+    // Make sure the username isn't already taken.
+    const { data: existing } = await supabase
+      .from("app_users")
+      .select("id")
+      .ilike("username", username.trim())
+      .maybeSingle();
+    if (existing) {
+      setLoading(false);
+      setError("That username is already taken. Please choose another.");
+      return;
+    }
+
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+    });
+
+    if (authError || !authData.user) {
+      setLoading(false);
+      setError(authError ? authError.message : "Could not create account. Please try again.");
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("app_users")
+      .insert({
+        auth_id: authData.user.id,
+        name: name.trim(),
+        designation: designation.trim() || null,
+        division: division.trim() || null,
+        role: "applicant",
+        username: username.trim(),
+        email: email.trim(),
+      })
+      .select()
+      .single();
+
+    setLoading(false);
+
+    if (profileError || !profile) {
+      setError("Account created, but your profile could not be saved. Contact the system administrator.");
+      return;
+    }
+
+    // If Supabase requires email confirmation, there may be no active
+    // session yet — in that case, send them to the login screen instead
+    // of straight into the app.
+    if (authData.session) {
+      onLogin(profile);
+    } else {
+      onDone();
+    }
+  }
+
+  return (
+    <AuthShell title="Create Applicant Account">
+      <form onSubmit={handleSubmit}>
+        <Field label="Full Name"><Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. R. Jayasuriya" /></Field>
+        <Field label="Designation"><Input value={designation} onChange={(e) => setDesignation(e.target.value)} placeholder="e.g. Assistant Registrar" /></Field>
+        <Field label="Division"><Input value={division} onChange={(e) => setDivision(e.target.value)} placeholder="e.g. Administration" /></Field>
+        <Field label="Username"><Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Choose a username" /></Field>
+        <Field label="Email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" /></Field>
+        <Field label="Password"><PasswordField value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" /></Field>
+        <Field label="Confirm Password"><PasswordField value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></Field>
+
+        <ErrorBanner>{error}</ErrorBanner>
+
+        <Btn type="submit" onClick={handleSubmit} icon={Lock} disabled={loading}>
+          {loading ? "Creating account…" : "Create Account"}
+        </Btn>
+
+        <div style={{ marginTop: 16, textAlign: "center" }}>
+          <button type="button" onClick={onDone} style={{ background: "none", border: "none", color: COLORS.greenSoft, cursor: "pointer", padding: 0, fontFamily: SANS, fontSize: 12.5 }}>
+            Already have an account? Log in
+          </button>
+        </div>
+      </form>
+    </AuthShell>
+  );
+}
+
+function ForgotPasswordScreen({ onBack }) {
+  const [username, setUsername] = useState("");
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!username.trim()) {
+      setError("Enter your username.");
+      return;
+    }
+    setLoading(true);
+
+    const lookup = await lookupEmailByUsername(username);
+    if (!lookup || !lookup.email) {
+      setLoading(false);
+      // Don't reveal whether the username exists — generic message either way.
+      setSent(true);
+      return;
+    }
+
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(lookup.email, {
+      redirectTo: window.location.origin,
+    });
+
+    setLoading(false);
+    if (resetError) {
+      setError("Could not send reset email. Please try again later.");
+      return;
+    }
+    setSent(true);
+  }
+
+  return (
+    <AuthShell title="Reset Password">
+      {sent ? (
+        <div>
+          <SuccessBanner>
+            If an account exists for that username, a password reset link has been sent to its registered email.
+          </SuccessBanner>
+          <Btn onClick={onBack} icon={Lock}>Back to Log In</Btn>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit}>
+          <div style={{ fontFamily: SANS, fontSize: 12.5, color: COLORS.inkSoft, marginBottom: 14, lineHeight: 1.6 }}>
+            Enter your username. If your account has a registered email address, we'll send a link to reset your password.
+          </div>
+          <Field label="Username">
+            <Input autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. rjayasuriya" />
+          </Field>
+          <ErrorBanner>{error}</ErrorBanner>
+          <Btn type="submit" onClick={handleSubmit} icon={Lock} disabled={loading}>
+            {loading ? "Sending…" : "Send Reset Link"}
+          </Btn>
+          <div style={{ marginTop: 16, textAlign: "center" }}>
+            <button type="button" onClick={onBack} style={{ background: "none", border: "none", color: COLORS.greenSoft, cursor: "pointer", padding: 0, fontFamily: SANS, fontSize: 12.5 }}>
+              Back to Log In
+            </button>
+          </div>
+        </form>
+      )}
+    </AuthShell>
   );
 }
 
@@ -606,6 +814,29 @@ export default function OVRAMS() {
       return null;
     }
   });
+
+  /* Verify the underlying Supabase Auth session is still valid on load.
+     If it's expired or was signed out elsewhere, clear our local copy too
+     so the person is correctly sent back to the login screen rather than
+     seeing a stale, now-unauthenticated view of the app. */
+  useEffect(() => {
+    if (!session) return;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        setSession(null);
+        try { localStorage.removeItem("ovrams_session"); } catch {}
+      }
+    });
+    // Also react to sign-outs that happen elsewhere (e.g. another tab).
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setSession(null);
+        try { localStorage.removeItem("ovrams_session"); } catch {}
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [requests, setRequests] = useState([]);
   const [requestsLoading, setRequestsLoading] = useState(true);
@@ -744,6 +975,7 @@ export default function OVRAMS() {
     showToast(`Welcome, ${user.name}.`);
   }
   function handleLogout() {
+    supabase.auth.signOut();
     setSession(null);
     try {
       localStorage.removeItem("ovrams_session");
@@ -784,9 +1016,9 @@ export default function OVRAMS() {
     return Object.entries(m).map(([label, value]) => ({ label, value }));
   }, [requests]);
 
-  /* If nobody is logged in, show the login screen and stop here. */
+  /* If nobody is logged in, show the login/signup/forgot-password flow. */
   if (!session) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return <AuthGate onLogin={handleLogin} />;
   }
 
   const NAV = {
@@ -1689,9 +1921,26 @@ function SchedulePanel({ requests }) {
 
 /* ================= USERS PANEL ================= */
 function UsersPanel() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("app_users")
+      .select("*")
+      .order("role", { ascending: true })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && data) setUsers(data);
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div>
-      <PageHeader title="Users" subtitle={`${USERS.length} accounts`} />
+      <PageHeader title="Users" subtitle={loading ? "Loading…" : `${users.length} accounts`} />
       <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px", overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
           <thead>
@@ -1702,7 +1951,7 @@ function UsersPanel() {
             </tr>
           </thead>
           <tbody>
-            {USERS.map((u) => (
+            {users.map((u) => (
               <tr key={u.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
                 <td style={{ padding: "10px 12px", fontWeight: 600 }}>{u.name}</td>
                 <td style={{ padding: "10px 12px" }}>{u.designation}</td>
