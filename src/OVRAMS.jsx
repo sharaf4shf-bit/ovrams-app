@@ -437,6 +437,83 @@ async function lookupEmailByUsername(username) {
 
 function AuthGate({ onLogin }) {
   const [mode, setMode] = useState("login"); // 'login' | 'signup' | 'forgot'
+  const [checkingConfirmation, setCheckingConfirmation] = useState(true);
+
+  /* If someone arrives here with a valid Supabase Auth session but no
+     matching app_users row yet, it means they just clicked an email
+     confirmation link from signup. Finish creating their profile now
+     (using the metadata stashed at signup time) and log them straight in,
+     instead of making them log in a second time. */
+  useEffect(() => {
+    let cancelled = false;
+    async function finishPendingSignup() {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const user = sessionData.session?.user;
+      if (!user) {
+        if (!cancelled) setCheckingConfirmation(false);
+        return;
+      }
+
+      const { data: existingProfile } = await supabase
+        .from("app_users")
+        .select("*")
+        .eq("auth_id", user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (existingProfile) {
+        onLogin(existingProfile);
+        return;
+      }
+
+      // No profile yet but a real session exists — this must be a
+      // freshly-confirmed applicant signup. Create their profile from the
+      // metadata we saved during signUp().
+      const meta = user.user_metadata || {};
+      if (meta.username) {
+        const { data: newProfile, error: insertError } = await supabase
+          .from("app_users")
+          .insert({
+            auth_id: user.id,
+            name: meta.name || meta.username,
+            designation: meta.designation || null,
+            division: meta.division || null,
+            role: "applicant",
+            username: meta.username,
+            email: user.email,
+          })
+          .select()
+          .single();
+
+        if (!cancelled) {
+          setCheckingConfirmation(false);
+          if (!insertError && newProfile) {
+            onLogin(newProfile);
+          }
+          // If it failed (e.g. username taken by the time they confirmed),
+          // fall through to the normal login screen; they can contact the
+          // administrator or try logging in directly.
+        }
+        return;
+      }
+
+      if (!cancelled) setCheckingConfirmation(false);
+    }
+    finishPendingSignup();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (checkingConfirmation) {
+    return (
+      <AuthShell title="One moment…">
+        <div style={{ fontFamily: SANS, fontSize: 13, color: COLORS.inkSoft, textAlign: "center", padding: "20px 0" }}>
+          Checking your account…
+        </div>
+      </AuthShell>
+    );
+  }
 
   if (mode === "signup") return <SignupScreen onDone={() => setMode("login")} onLogin={onLogin} />;
   if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
@@ -633,6 +710,7 @@ function SignupScreen({ onDone, onLogin }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -665,46 +743,70 @@ function SignupScreen({ onDone, onLogin }) {
       return;
     }
 
+    // The profile fields are stored as Supabase Auth user metadata at
+    // signup time. We can't create the app_users row yet if email
+    // confirmation is required (there's no active session, so RLS
+    // correctly blocks the insert) — instead, the row gets created the
+    // moment they confirm their email and land back on the site with a
+    // real session (see the effect in AuthGate/App that watches for this).
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
+      options: {
+        data: {
+          name: name.trim(),
+          designation: designation.trim() || null,
+          division: division.trim() || null,
+          username: username.trim(),
+        },
+      },
     });
 
+    setLoading(false);
+
     if (authError || !authData.user) {
-      setLoading(false);
       setError(authError ? authError.message : "Could not create account. Please try again.");
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
-      .from("app_users")
-      .insert({
-        auth_id: authData.user.id,
-        name: name.trim(),
-        designation: designation.trim() || null,
-        division: division.trim() || null,
-        role: "applicant",
-        username: username.trim(),
-        email: email.trim(),
-      })
-      .select()
-      .single();
-
-    setLoading(false);
-
-    if (profileError || !profile) {
-      setError("Account created, but your profile could not be saved. Contact the system administrator.");
-      return;
-    }
-
-    // If Supabase requires email confirmation, there may be no active
-    // session yet — in that case, send them to the login screen instead
-    // of straight into the app.
     if (authData.session) {
+      // Email confirmation is off — session exists immediately, so we can
+      // create the profile row right now.
+      const { data: profile, error: profileError } = await supabase
+        .from("app_users")
+        .insert({
+          auth_id: authData.user.id,
+          name: name.trim(),
+          designation: designation.trim() || null,
+          division: division.trim() || null,
+          role: "applicant",
+          username: username.trim(),
+          email: email.trim(),
+        })
+        .select()
+        .single();
+
+      if (profileError || !profile) {
+        setError("Account created, but your profile could not be saved. Contact the system administrator.");
+        return;
+      }
       onLogin(profile);
     } else {
-      onDone();
+      // Email confirmation is required — nothing more to do here. The
+      // profile row is created automatically once they confirm and return.
+      setAwaitingConfirmation(true);
     }
+  }
+
+  if (awaitingConfirmation) {
+    return (
+      <AuthShell title="Check Your Email">
+        <SuccessBanner>
+          We've sent a confirmation link to <strong>{email}</strong>. Click it to activate your account, then come back here and log in.
+        </SuccessBanner>
+        <Btn onClick={onDone} icon={Lock}>Back to Log In</Btn>
+      </AuthShell>
+    );
   }
 
   return (
