@@ -595,8 +595,17 @@ function LoginScreen({ onLogin }) {
 
 /* ================= MAIN APP ================= */
 export default function OVRAMS() {
-  /* Added: session state. No one sees any page until authenticated. */
-  const [session, setSession] = useState(null);
+  /* Added: session state. No one sees any page until authenticated.
+     Persisted to localStorage so refreshing the page (or closing and
+     reopening the tab) doesn't log the person out. */
+  const [session, setSession] = useState(() => {
+    try {
+      const saved = localStorage.getItem("ovrams_session");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const [requests, setRequests] = useState([]);
   const [requestsLoading, setRequestsLoading] = useState(true);
@@ -725,12 +734,22 @@ export default function OVRAMS() {
 
   function handleLogin(user) {
     setSession(user);
+    try {
+      localStorage.setItem("ovrams_session", JSON.stringify(user));
+    } catch (e) {
+      console.error("Could not save session:", e);
+    }
     setPage("dashboard");
     setSelectedReqId(null);
     showToast(`Welcome, ${user.name}.`);
   }
   function handleLogout() {
     setSession(null);
+    try {
+      localStorage.removeItem("ovrams_session");
+    } catch (e) {
+      console.error("Could not clear session:", e);
+    }
     setPage("dashboard");
     setSelectedReqId(null);
     setNavOpen(false);
