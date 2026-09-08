@@ -711,6 +711,10 @@ function SignupScreen({ onDone, onLogin }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [code, setCode] = useState("");
+  const [verifyError, setVerifyError] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -746,9 +750,9 @@ function SignupScreen({ onDone, onLogin }) {
     // The profile fields are stored as Supabase Auth user metadata at
     // signup time. We can't create the app_users row yet if email
     // confirmation is required (there's no active session, so RLS
-    // correctly blocks the insert) — instead, the row gets created the
-    // moment they confirm their email and land back on the site with a
-    // real session (see the effect in AuthGate/App that watches for this).
+    // correctly blocks the insert) — instead, the row gets created right
+    // after they successfully enter the 6-digit code we email them (see
+    // handleVerifyCode below).
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
@@ -771,7 +775,7 @@ function SignupScreen({ onDone, onLogin }) {
 
     if (authData.session) {
       // Email confirmation is off — session exists immediately, so we can
-      // create the profile row right now.
+      // create the profile row right now without needing a code at all.
       const { data: profile, error: profileError } = await supabase
         .from("app_users")
         .insert({
@@ -792,19 +796,113 @@ function SignupScreen({ onDone, onLogin }) {
       }
       onLogin(profile);
     } else {
-      // Email confirmation is required — nothing more to do here. The
-      // profile row is created automatically once they confirm and return.
+      // Email confirmation is required — show the code-entry screen next.
       setAwaitingConfirmation(true);
+      setResendCooldown(30);
     }
   }
 
+  async function handleVerifyCode(e) {
+    e.preventDefault();
+    setVerifyError("");
+    if (!code.trim()) {
+      setVerifyError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setVerifying(true);
+
+    const { data: verifyData, error: verifyErr } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: code.trim(),
+      type: "signup",
+    });
+
+    if (verifyErr || !verifyData.session) {
+      setVerifying(false);
+      setVerifyError("That code is incorrect or has expired. Please check your email and try again, or request a new code.");
+      return;
+    }
+
+    // Session is now active — create the profile row.
+    const { data: profile, error: profileError } = await supabase
+      .from("app_users")
+      .insert({
+        auth_id: verifyData.user.id,
+        name: name.trim(),
+        designation: designation.trim() || null,
+        division: division.trim() || null,
+        role: "applicant",
+        username: username.trim(),
+        email: email.trim(),
+      })
+      .select()
+      .single();
+
+    setVerifying(false);
+
+    if (profileError || !profile) {
+      setVerifyError("Verified, but your profile could not be saved. Contact the system administrator.");
+      return;
+    }
+
+    onLogin(profile);
+  }
+
+  async function handleResendCode() {
+    if (resendCooldown > 0) return;
+    setVerifyError("");
+    const { error: resendErr } = await supabase.auth.resend({
+      type: "signup",
+      email: email.trim(),
+    });
+    if (resendErr) {
+      setVerifyError("Could not resend the code. Please wait a moment and try again.");
+      return;
+    }
+    setResendCooldown(30);
+  }
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
+
   if (awaitingConfirmation) {
     return (
-      <AuthShell title="Check Your Email">
-        <SuccessBanner>
-          We've sent a confirmation link to <strong>{email}</strong>. Click it to activate your account, then come back here and log in.
-        </SuccessBanner>
-        <Btn onClick={onDone} icon={Lock}>Back to Log In</Btn>
+      <AuthShell title="Enter Confirmation Code">
+        <form onSubmit={handleVerifyCode}>
+          <div style={{ fontFamily: SANS, fontSize: 12.5, color: COLORS.inkSoft, marginBottom: 14, lineHeight: 1.6 }}>
+            We've sent a 6-digit code to <strong>{email}</strong>. Enter it below to activate your account.
+          </div>
+          <Field label="Confirmation Code">
+            <Input
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="123456"
+              style={{ letterSpacing: 3, fontSize: 18, textAlign: "center" }}
+            />
+          </Field>
+          <ErrorBanner>{verifyError}</ErrorBanner>
+          <Btn type="submit" onClick={handleVerifyCode} icon={Lock} disabled={verifying}>
+            {verifying ? "Verifying…" : "Verify & Activate Account"}
+          </Btn>
+          <div style={{ marginTop: 16, textAlign: "center", fontFamily: SANS, fontSize: 12.5 }}>
+            <button
+              type="button"
+              onClick={handleResendCode}
+              disabled={resendCooldown > 0}
+              style={{
+                background: "none", border: "none", padding: 0, fontFamily: SANS, fontSize: 12.5,
+                color: resendCooldown > 0 ? COLORS.inkSoft : COLORS.greenSoft,
+                cursor: resendCooldown > 0 ? "default" : "pointer",
+              }}
+            >
+              {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : "Resend code"}
+            </button>
+          </div>
+        </form>
       </AuthShell>
     );
   }
@@ -837,12 +935,23 @@ function SignupScreen({ onDone, onLogin }) {
 }
 
 function ForgotPasswordScreen({ onBack }) {
+  const [step, setStep] = useState("request"); // 'request' | 'verify' | 'done'
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [error, setError] = useState("");
-  const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
-  async function handleSubmit(e) {
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
+
+  async function handleRequestCode(e) {
     e.preventDefault();
     setError("");
     if (!username.trim()) {
@@ -852,45 +961,136 @@ function ForgotPasswordScreen({ onBack }) {
     setLoading(true);
 
     const lookup = await lookupEmailByUsername(username);
+    setLoading(false);
+
     if (!lookup || !lookup.email) {
-      setLoading(false);
-      // Don't reveal whether the username exists — generic message either way.
-      setSent(true);
+      // Don't reveal whether the username exists — but there's genuinely
+      // nowhere to send a code, so we can't proceed to the code step.
+      setError("If that username exists, it doesn't have a registered email on file. Contact the system administrator.");
       return;
     }
 
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(lookup.email, {
-      redirectTo: window.location.origin,
+    setEmail(lookup.email);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(lookup.email);
+    if (resetError) {
+      setError("Could not send a reset code. Please try again later.");
+      return;
+    }
+    setStep("verify");
+    setResendCooldown(30);
+  }
+
+  async function handleResendCode() {
+    if (resendCooldown > 0) return;
+    setError("");
+    const { error: resendErr } = await supabase.auth.resetPasswordForEmail(email);
+    if (resendErr) {
+      setError("Could not resend the code. Please wait a moment and try again.");
+      return;
+    }
+    setResendCooldown(30);
+  }
+
+  async function handleVerifyAndReset(e) {
+    e.preventDefault();
+    setError("");
+    if (!code.trim()) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setLoading(true);
+
+    const { data: verifyData, error: verifyErr } = await supabase.auth.verifyOtp({
+      email,
+      token: code.trim(),
+      type: "recovery",
     });
 
-    setLoading(false);
-    if (resetError) {
-      setError("Could not send reset email. Please try again later.");
+    if (verifyErr || !verifyData.session) {
+      setLoading(false);
+      setError("That code is incorrect or has expired. Please check your email and try again, or request a new code.");
       return;
     }
-    setSent(true);
+
+    const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword });
+    setLoading(false);
+
+    if (updateErr) {
+      setError("Your code was verified, but the password could not be updated. Please try again.");
+      return;
+    }
+
+    // Sign out of this recovery session so they log in fresh with the new
+    // password via the normal login screen.
+    await supabase.auth.signOut();
+    setStep("done");
   }
 
   return (
     <AuthShell title="Reset Password">
-      {sent ? (
+      {step === "done" ? (
         <div>
-          <SuccessBanner>
-            If an account exists for that username, a password reset link has been sent to its registered email.
-          </SuccessBanner>
+          <SuccessBanner>Your password has been updated. You can now log in with your new password.</SuccessBanner>
           <Btn onClick={onBack} icon={Lock}>Back to Log In</Btn>
         </div>
-      ) : (
-        <form onSubmit={handleSubmit}>
+      ) : step === "verify" ? (
+        <form onSubmit={handleVerifyAndReset}>
           <div style={{ fontFamily: SANS, fontSize: 12.5, color: COLORS.inkSoft, marginBottom: 14, lineHeight: 1.6 }}>
-            Enter your username. If your account has a registered email address, we'll send a link to reset your password.
+            We've sent a 6-digit code to <strong>{email}</strong>. Enter it below along with your new password.
+          </div>
+          <Field label="Confirmation Code">
+            <Input
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="123456"
+              style={{ letterSpacing: 3, fontSize: 18, textAlign: "center" }}
+            />
+          </Field>
+          <Field label="New Password">
+            <PasswordField value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="At least 8 characters" />
+          </Field>
+          <Field label="Confirm New Password">
+            <PasswordField value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} />
+          </Field>
+          <ErrorBanner>{error}</ErrorBanner>
+          <Btn type="submit" onClick={handleVerifyAndReset} icon={Lock} disabled={loading}>
+            {loading ? "Updating…" : "Verify & Set New Password"}
+          </Btn>
+          <div style={{ marginTop: 16, textAlign: "center", fontFamily: SANS, fontSize: 12.5 }}>
+            <button
+              type="button"
+              onClick={handleResendCode}
+              disabled={resendCooldown > 0}
+              style={{
+                background: "none", border: "none", padding: 0, fontFamily: SANS, fontSize: 12.5,
+                color: resendCooldown > 0 ? COLORS.inkSoft : COLORS.greenSoft,
+                cursor: resendCooldown > 0 ? "default" : "pointer",
+              }}
+            >
+              {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : "Resend code"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={handleRequestCode}>
+          <div style={{ fontFamily: SANS, fontSize: 12.5, color: COLORS.inkSoft, marginBottom: 14, lineHeight: 1.6 }}>
+            Enter your username. If your account has a registered email address, we'll send a code to reset your password.
           </div>
           <Field label="Username">
             <Input autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. rjayasuriya" />
           </Field>
           <ErrorBanner>{error}</ErrorBanner>
-          <Btn type="submit" onClick={handleSubmit} icon={Lock} disabled={loading}>
-            {loading ? "Sending…" : "Send Reset Link"}
+          <Btn type="submit" onClick={handleRequestCode} icon={Lock} disabled={loading}>
+            {loading ? "Sending…" : "Send Reset Code"}
           </Btn>
           <div style={{ marginTop: 16, textAlign: "center" }}>
             <button type="button" onClick={onBack} style={{ background: "none", border: "none", color: COLORS.greenSoft, cursor: "pointer", padding: 0, fontFamily: SANS, fontSize: 12.5 }}>
