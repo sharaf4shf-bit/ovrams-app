@@ -106,8 +106,8 @@ function dbRequestToApp(row, officersRows, historyRows) {
     applicantId: row.applicant_id,
     division: row.division,
     purpose: row.purpose,
-    destination: row.destination,
-    journeyType: row.journey_type,
+    startingLocation: row.starting_location,
+    destinationLocation: row.destination_location,
     start: row.start_time,
     end: row.end_time,
     officers: (officersRows || [])
@@ -144,7 +144,7 @@ const REQUESTS_SEED = [
   {
     id: "REQ-2026-0142", applicantId: "u1", division: "Administration",
     purpose: "Attend inter-ministerial coordination meeting",
-    destination: "BMICH, Colombo 07", journeyType: "Local",
+    startingLocation: "Ministry HQ", destinationLocation: "BMICH, Colombo 07",
     start: "2026-09-05T08:00", end: "2026-09-05T17:00",
     officers: [{ name: "R. Jayasuriya", designation: "Assistant Registrar", dept: "Administration" }],
     adequateSpace: "Yes",
@@ -155,7 +155,7 @@ const REQUESTS_SEED = [
   {
     id: "REQ-2026-0139", applicantId: "u2", division: "Engineering",
     purpose: "Site inspection of bridge construction project",
-    destination: "Kalutara District", journeyType: "External",
+    startingLocation: "Ministry HQ", destinationLocation: "Kalutara District",
     start: "2026-09-04T06:30", end: "2026-09-04T19:00",
     officers: [
       { name: "N. Fernando", designation: "Programme Officer", dept: "Engineering" },
@@ -172,7 +172,7 @@ const REQUESTS_SEED = [
   {
     id: "REQ-2026-0136", applicantId: "u1", division: "Administration",
     purpose: "Deliver documents to Provincial Office",
-    destination: "Kandy Provincial Office", journeyType: "External",
+    startingLocation: "Ministry HQ", destinationLocation: "Kandy Provincial Office",
     start: "2026-09-03T07:00", end: "2026-09-03T18:00",
     officers: [{ name: "R. Jayasuriya", designation: "Assistant Registrar", dept: "Administration" }],
     adequateSpace: "Yes", status: STATUS.VEHICLE_ASSIGNED,
@@ -186,7 +186,7 @@ const REQUESTS_SEED = [
   {
     id: "REQ-2026-0128", applicantId: "u2", division: "Engineering",
     purpose: "Training workshop attendance",
-    destination: "NIBM, Colombo 07", journeyType: "Local",
+    startingLocation: "Ministry HQ", destinationLocation: "NIBM, Colombo 07",
     start: "2026-08-25T08:00", end: "2026-08-25T16:00",
     officers: [{ name: "N. Fernando", designation: "Programme Officer", dept: "Engineering" }],
     adequateSpace: "Yes",
@@ -202,7 +202,7 @@ const REQUESTS_SEED = [
   {
     id: "REQ-2026-0119", applicantId: "u1", division: "Administration",
     purpose: "Personal errand request (test rejection)",
-    destination: "Negombo", journeyType: "Local",
+    startingLocation: "Ministry HQ", destinationLocation: "Negombo",
     start: "2026-08-15T08:00", end: "2026-08-15T12:00",
     officers: [{ name: "R. Jayasuriya", designation: "Assistant Registrar", dept: "Administration" }],
     adequateSpace: "No",
@@ -216,7 +216,7 @@ const REQUESTS_SEED = [
   {
     id: "REQ-2026-0101", applicantId: "u2", division: "Engineering",
     purpose: "Quarterly asset audit visit",
-    destination: "Galle Regional Office", journeyType: "External",
+    startingLocation: "Ministry HQ", destinationLocation: "Galle Regional Office",
     start: "2026-07-20T07:00", end: "2026-07-20T19:00",
     officers: [{ name: "N. Fernando", designation: "Programme Officer", dept: "Engineering" }],
     adequateSpace: "Yes",
@@ -1530,8 +1530,8 @@ export default function OVRAMS() {
               applicant_id: newReq.applicantId,
               division: newReq.division,
               purpose: newReq.purpose,
-              destination: newReq.destination,
-              journey_type: newReq.journeyType,
+              starting_location: newReq.startingLocation,
+              destination_location: newReq.destinationLocation,
               start_time: newReq.start,
               end_time: newReq.end,
               adequate_space: newReq.adequateSpace,
@@ -1659,7 +1659,7 @@ function RequestTable({ requests, onOpen }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
         <thead>
           <tr style={{ borderBottom: `2px solid ${COLORS.ink}` }}>
-            {["Request ID", "Destination", "Start", "End", "Status", ""].map((h) => (
+            {["Request ID", "Starting Location", "Destination", "Start", "End", "Status", ""].map((h) => (
               <th key={h} style={{ textAlign: "left", padding: "8px 10px", fontWeight: 600, color: COLORS.inkSoft, fontSize: 11.5 }}>{h}</th>
             ))}
           </tr>
@@ -1668,7 +1668,8 @@ function RequestTable({ requests, onOpen }) {
           {requests.map((r) => (
             <tr key={r.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
               <td style={{ padding: "10px 10px", fontWeight: 600 }}>{r.id}</td>
-              <td style={{ padding: "10px 10px" }}>{r.destination}</td>
+              <td style={{ padding: "10px 10px" }}>{r.startingLocation}</td>
+              <td style={{ padding: "10px 10px" }}>{r.destinationLocation}</td>
               <td style={{ padding: "10px 10px" }}>{fmtD(r.start)}</td>
               <td style={{ padding: "10px 10px" }}>{fmtD(r.end)}</td>
               <td style={{ padding: "10px 10px" }}><Badge status={r.status} /></td>
@@ -1687,7 +1688,9 @@ function RequestList({ title, requests, onOpen, onNewRequest, showNew, emptyMsg,
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const filtered = requests.filter((r) => {
-    const matchQ = !q || r.id.toLowerCase().includes(q.toLowerCase()) || r.destination.toLowerCase().includes(q.toLowerCase());
+    const matchQ = !q || r.id.toLowerCase().includes(q.toLowerCase()) ||
+      (r.startingLocation || "").toLowerCase().includes(q.toLowerCase()) ||
+      (r.destinationLocation || "").toLowerCase().includes(q.toLowerCase());
     const matchS = !statusFilter || r.status === statusFilter;
     return matchQ && matchS;
   });
@@ -1698,7 +1701,7 @@ function RequestList({ title, requests, onOpen, onNewRequest, showNew, emptyMsg,
         <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
           <div style={{ position: "relative", flex: "1 1 220px" }}>
             <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
-            <Input placeholder="Search by ID or destination…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
+            <Input placeholder="Search by ID, starting location, or destination…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
           </div>
           <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ maxWidth: 220 }}>
             <option value="">All statuses</option>
@@ -1803,8 +1806,8 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
       {/* Section B */}
       <SectionCard label="Section B" title="Journey Information">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 14 }}>
-          <Field label="Destination"><div>{req.destination}</div></Field>
-          <Field label="Journey Type"><div>{req.journeyType}</div></Field>
+          <Field label="Starting Location"><div>{req.startingLocation}</div></Field>
+          <Field label="Destination Location"><div>{req.destinationLocation}</div></Field>
           <Field label="Starting Date/Time"><div>{fmtDT(req.start)}</div></Field>
           <Field label="Ending Date/Time"><div>{fmtDT(req.end)}</div></Field>
         </div>
@@ -2082,7 +2085,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
 
           <SectionCard label="Section B" title="Journey Information">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 14 }}>
-              <Field label="Place to which vehicle should travel *"><Input value={destination} onChange={(e) => setDestination(e.target.value)} /></Field>
+              <Field label="Destination *"><Input value={destination} onChange={(e) => setDestination(e.target.value)} /></Field>
               <Field label="Journey Type *">
                 <Select value={journeyType} onChange={(e) => setJourneyType(e.target.value)}>
                   <option>Local</option>
