@@ -1282,8 +1282,11 @@ export default function OVRAMS() {
     setSelectedReqId(null);
     showToast(`Welcome, ${user.name}.`);
   }
-  function handleLogout() {
-    supabase.auth.signOut();
+  async function handleLogout() {
+    // Wait for Supabase to fully clear the session before switching to the
+    // login screen — otherwise AuthGate can mount while the old session is
+    // still technically active and silently log the person back in.
+    await supabase.auth.signOut();
     setSession(null);
     try {
       localStorage.removeItem("ovrams_session");
