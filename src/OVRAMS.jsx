@@ -2224,9 +2224,90 @@ function AddVehicleModal({ onClose, onAdded, showToast }) {
   );
 }
 
+/* ================= EDIT VEHICLE MODAL ================= */
+function EditVehicleModal({ vehicle, onClose, onSaved, showToast }) {
+  const [reg, setReg] = useState(vehicle.reg || "");
+  const [type, setType] = useState(vehicle.type || "");
+  const [model, setModel] = useState(vehicle.model || "");
+  const [meter, setMeter] = useState(vehicle.meter != null ? String(vehicle.meter) : "");
+  const [status, setStatus] = useState(vehicle.status || "Available");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!reg.trim() || !type.trim() || !model.trim()) {
+      setError("Please fill in registration number, type, and model.");
+      return;
+    }
+    setSaving(true);
+
+    const { data, error: updateError } = await supabase
+      .from("vehicles")
+      .update({
+        reg: reg.trim(),
+        type: type.trim(),
+        model: model.trim(),
+        meter: meter ? parseInt(meter, 10) : 0,
+        status,
+      })
+      .eq("id", vehicle.id)
+      .select()
+      .single();
+
+    setSaving(false);
+
+    if (updateError || !data) {
+      setError(
+        updateError && updateError.code === "23505"
+          ? "A vehicle with that registration number already exists."
+          : "Could not save changes. Please try again."
+      );
+      return;
+    }
+
+    onSaved(data);
+    showToast(`Vehicle ${data.reg} updated.`);
+    onClose();
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,22,.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 16px", zIndex: 2000 }}>
+      <div style={{ background: "#fff", borderRadius: 5, width: "100%", maxWidth: 460, marginBottom: 40 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
+          <h2 style={{ fontFamily: SERIF, fontSize: 18, margin: 0 }}>Edit Vehicle</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.ink, fontSize: 20, lineHeight: 1 }}>×</button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: 22 }}>
+          <Field label="Registration Number *"><Input value={reg} onChange={(e) => setReg(e.target.value)} /></Field>
+          <Field label="Type *"><Input value={type} onChange={(e) => setType(e.target.value)} /></Field>
+          <Field label="Model *"><Input value={model} onChange={(e) => setModel(e.target.value)} /></Field>
+          <Field label="Current Meter Reading (km)"><Input type="number" value={meter} onChange={(e) => setMeter(e.target.value)} /></Field>
+          <Field label="Status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option>Available</option>
+              <option>Maintenance</option>
+              <option>Unavailable</option>
+            </Select>
+          </Field>
+
+          <ErrorBanner>{error}</ErrorBanner>
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+            <Btn variant="ghost" onClick={onClose} type="button">Cancel</Btn>
+            <Btn type="submit" onClick={handleSubmit} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Btn>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* ================= VEHICLE PANEL ================= */
 function VehiclePanel({ vehicles, requests, roleKey, setVehicles, showToast }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState(null);
   const statusColor = { Available: COLORS.green, Maintenance: COLORS.amber, Assigned: COLORS.blueGrey };
   return (
     <div>
@@ -2253,10 +2334,32 @@ function VehiclePanel({ vehicles, requests, roleKey, setVehicles, showToast }) {
                 <Gauge size={13} /> {v.meter.toLocaleString()} km
               </div>
               {active && <div style={{ fontSize: 11.5, marginTop: 8, color: COLORS.blueGrey }}>Currently on {active.id}</div>}
+              {roleKey === "admin" && (
+                <div style={{ marginTop: 10 }}>
+                  <Btn variant="ghost" small onClick={() => setEditingVehicle(v)}>Edit</Btn>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
+
+      {editingVehicle && (
+        <EditVehicleModal
+          vehicle={editingVehicle}
+          onClose={() => setEditingVehicle(null)}
+          showToast={showToast}
+          onSaved={(v) =>
+            setVehicles((vs) =>
+              vs.map((x) =>
+                x.id === v.id
+                  ? { id: v.id, reg: v.reg, type: v.type, model: v.model, status: v.status, meter: v.meter }
+                  : x
+              )
+            )
+          }
+        />
+      )}
 
       {showAdd && (
         <AddVehicleModal
@@ -2356,9 +2459,93 @@ function AddDriverModal({ onClose, onAdded, showToast }) {
   );
 }
 
+/* ================= EDIT DRIVER MODAL ================= */
+function EditDriverModal({ driver, onClose, onSaved, showToast }) {
+  const [name, setName] = useState(driver.name || "");
+  const [empNo, setEmpNo] = useState(driver.empNo || "");
+  const [contact, setContact] = useState(driver.contact || "");
+  const [license, setLicense] = useState(driver.license || "");
+  const [expiry, setExpiry] = useState(driver.expiry || "");
+  const [status, setStatus] = useState(driver.status || "Active");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!name.trim() || !empNo.trim()) {
+      setError("Please fill in name and employee number.");
+      return;
+    }
+    setSaving(true);
+
+    const { data, error: updateError } = await supabase
+      .from("drivers")
+      .update({
+        name: name.trim(),
+        emp_no: empNo.trim(),
+        contact: contact.trim() || null,
+        license: license.trim() || null,
+        expiry: expiry || null,
+        status,
+      })
+      .eq("id", driver.id)
+      .select()
+      .single();
+
+    setSaving(false);
+
+    if (updateError || !data) {
+      setError(
+        updateError && updateError.code === "23505"
+          ? "A driver with that employee number already exists."
+          : "Could not save changes. Please try again."
+      );
+      return;
+    }
+
+    onSaved(data);
+    showToast(`Driver ${data.name} updated.`);
+    onClose();
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,22,.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 16px", zIndex: 2000 }}>
+      <div style={{ background: "#fff", borderRadius: 5, width: "100%", maxWidth: 460, marginBottom: 40 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
+          <h2 style={{ fontFamily: SERIF, fontSize: 18, margin: 0 }}>Edit Driver</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.ink, fontSize: 20, lineHeight: 1 }}>×</button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: 22 }}>
+          <Field label="Full Name *"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label="Employee Number *"><Input value={empNo} onChange={(e) => setEmpNo(e.target.value)} /></Field>
+          <Field label="Contact Number"><Input value={contact} onChange={(e) => setContact(e.target.value)} /></Field>
+          <Field label="License Number"><Input value={license} onChange={(e) => setLicense(e.target.value)} /></Field>
+          <Field label="License Expiry"><Input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} /></Field>
+          <Field label="Status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option>Active</option>
+              <option>On Leave</option>
+              <option>Inactive</option>
+            </Select>
+          </Field>
+
+          <ErrorBanner>{error}</ErrorBanner>
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+            <Btn variant="ghost" onClick={onClose} type="button">Cancel</Btn>
+            <Btn type="submit" onClick={handleSubmit} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Btn>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* ================= DRIVERS PANEL ================= */
 function DriverPanel({ drivers, requests, roleKey, setDrivers, showToast }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [editingDriver, setEditingDriver] = useState(null);
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
@@ -2371,7 +2558,7 @@ function DriverPanel({ drivers, requests, roleKey, setDrivers, showToast }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
           <thead>
             <tr style={{ background: COLORS.paperDark, borderBottom: `1px solid ${COLORS.line}` }}>
-              {["Name", "Employee No.", "Contact", "License", "Expiry", "Status"].map((h) => (
+              {["Name", "Employee No.", "Contact", "License", "Expiry", "Status", ""].map((h) => (
                 <th key={h} style={{ textAlign: "left", padding: "9px 12px", fontSize: 11.5, color: COLORS.inkSoft }}>{h}</th>
               ))}
             </tr>
@@ -2387,11 +2574,33 @@ function DriverPanel({ drivers, requests, roleKey, setDrivers, showToast }) {
                 <td style={{ padding: "10px 12px" }}>
                   <span style={{ fontSize: 11.5, fontWeight: 700, color: d.status === "Active" ? COLORS.green : COLORS.amber }}>{d.status}</span>
                 </td>
+                <td style={{ padding: "10px 12px" }}>
+                  {roleKey === "admin" && (
+                    <Btn variant="ghost" small onClick={() => setEditingDriver(d)}>Edit</Btn>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {editingDriver && (
+        <EditDriverModal
+          driver={editingDriver}
+          onClose={() => setEditingDriver(null)}
+          showToast={showToast}
+          onSaved={(d) =>
+            setDrivers((ds) =>
+              ds.map((x) =>
+                x.id === d.id
+                  ? { id: d.id, name: d.name, empNo: d.emp_no, contact: d.contact, license: d.license, expiry: d.expiry, status: d.status }
+                  : x
+              )
+            )
+          }
+        />
+      )}
 
       {showAdd && (
         <AddDriverModal
