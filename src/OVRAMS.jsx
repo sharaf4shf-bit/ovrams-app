@@ -1506,9 +1506,9 @@ export default function OVRAMS() {
           ) : page === "all-requests" ? (
             <RequestList title="All Vehicle Requests" requests={requests} onOpen={setSelectedReqId} showFilters />
           ) : page === "vehicles" ? (
-            <VehiclePanel vehicles={vehicles} requests={requests} />
+            <VehiclePanel vehicles={vehicles} requests={requests} roleKey={roleKey} setVehicles={setVehicles} showToast={showToast} />
           ) : page === "drivers" ? (
-            <DriverPanel drivers={drivers} requests={requests} />
+            <DriverPanel drivers={drivers} requests={requests} roleKey={roleKey} setDrivers={setDrivers} showToast={showToast} />
           ) : page === "schedule" ? (
             <SchedulePanel requests={requests} vehicles={vehicles} drivers={drivers} />
           ) : page === "users" ? (
@@ -2145,11 +2145,97 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
 }
 
 /* ================= VEHICLES PANEL ================= */
-function VehiclePanel({ vehicles, requests }) {
+/* ================= ADD VEHICLE MODAL ================= */
+function AddVehicleModal({ onClose, onAdded, showToast }) {
+  const [reg, setReg] = useState("");
+  const [type, setType] = useState("");
+  const [model, setModel] = useState("");
+  const [meter, setMeter] = useState("");
+  const [status, setStatus] = useState("Available");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!reg.trim() || !type.trim() || !model.trim()) {
+      setError("Please fill in registration number, type, and model.");
+      return;
+    }
+    setSaving(true);
+
+    const { data, error: insertError } = await supabase
+      .from("vehicles")
+      .insert({
+        reg: reg.trim(),
+        type: type.trim(),
+        model: model.trim(),
+        meter: meter ? parseInt(meter, 10) : 0,
+        status,
+      })
+      .select()
+      .single();
+
+    setSaving(false);
+
+    if (insertError || !data) {
+      setError(
+        insertError && insertError.code === "23505"
+          ? "A vehicle with that registration number already exists."
+          : "Could not save the vehicle. Please try again."
+      );
+      return;
+    }
+
+    onAdded(data);
+    showToast(`Vehicle ${data.reg} added.`);
+    onClose();
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,22,.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 16px", zIndex: 2000 }}>
+      <div style={{ background: "#fff", borderRadius: 5, width: "100%", maxWidth: 460, marginBottom: 40 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
+          <h2 style={{ fontFamily: SERIF, fontSize: 18, margin: 0 }}>Add Vehicle</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.ink, fontSize: 20, lineHeight: 1 }}>×</button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: 22 }}>
+          <Field label="Registration Number *"><Input value={reg} onChange={(e) => setReg(e.target.value)} placeholder="e.g. WP-KA-1234" /></Field>
+          <Field label="Type *"><Input value={type} onChange={(e) => setType(e.target.value)} placeholder="e.g. Van, Car, Double Cab, Bus" /></Field>
+          <Field label="Model *"><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. Toyota HiAce (2019)" /></Field>
+          <Field label="Current Meter Reading (km)"><Input type="number" value={meter} onChange={(e) => setMeter(e.target.value)} placeholder="0" /></Field>
+          <Field label="Status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option>Available</option>
+              <option>Maintenance</option>
+              <option>Unavailable</option>
+            </Select>
+          </Field>
+
+          <ErrorBanner>{error}</ErrorBanner>
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+            <Btn variant="ghost" onClick={onClose} type="button">Cancel</Btn>
+            <Btn type="submit" onClick={handleSubmit} disabled={saving}>{saving ? "Saving…" : "Add Vehicle"}</Btn>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ================= VEHICLE PANEL ================= */
+function VehiclePanel({ vehicles, requests, roleKey, setVehicles, showToast }) {
+  const [showAdd, setShowAdd] = useState(false);
   const statusColor = { Available: COLORS.green, Maintenance: COLORS.amber, Assigned: COLORS.blueGrey };
   return (
     <div>
-      <PageHeader title="Vehicles" subtitle={`${vehicles.length} vehicles registered`} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+        <PageHeader title="Vehicles" subtitle={`${vehicles.length} vehicles registered`} />
+        {roleKey === "admin" && (
+          <Btn icon={Plus} onClick={() => setShowAdd(true)}>Add Vehicle</Btn>
+        )}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px,1fr))", gap: 14 }}>
         {vehicles.map((v) => {
           const active = requests.find((r) => r.vehicleId === v.id && [STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW, STATUS.APPROVED].includes(r.status));
@@ -2171,15 +2257,116 @@ function VehiclePanel({ vehicles, requests }) {
           );
         })}
       </div>
+
+      {showAdd && (
+        <AddVehicleModal
+          onClose={() => setShowAdd(false)}
+          showToast={showToast}
+          onAdded={(v) =>
+            setVehicles((vs) => [
+              ...vs,
+              { id: v.id, reg: v.reg, type: v.type, model: v.model, status: v.status, meter: v.meter },
+            ])
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+/* ================= ADD DRIVER MODAL ================= */
+function AddDriverModal({ onClose, onAdded, showToast }) {
+  const [name, setName] = useState("");
+  const [empNo, setEmpNo] = useState("");
+  const [contact, setContact] = useState("");
+  const [license, setLicense] = useState("");
+  const [expiry, setExpiry] = useState("");
+  const [status, setStatus] = useState("Active");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!name.trim() || !empNo.trim()) {
+      setError("Please fill in name and employee number.");
+      return;
+    }
+    setSaving(true);
+
+    const { data, error: insertError } = await supabase
+      .from("drivers")
+      .insert({
+        name: name.trim(),
+        emp_no: empNo.trim(),
+        contact: contact.trim() || null,
+        license: license.trim() || null,
+        expiry: expiry || null,
+        status,
+      })
+      .select()
+      .single();
+
+    setSaving(false);
+
+    if (insertError || !data) {
+      setError(
+        insertError && insertError.code === "23505"
+          ? "A driver with that employee number already exists."
+          : "Could not save the driver. Please try again."
+      );
+      return;
+    }
+
+    onAdded(data);
+    showToast(`Driver ${data.name} added.`);
+    onClose();
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,22,.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 16px", zIndex: 2000 }}>
+      <div style={{ background: "#fff", borderRadius: 5, width: "100%", maxWidth: 460, marginBottom: 40 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
+          <h2 style={{ fontFamily: SERIF, fontSize: 18, margin: 0 }}>Add Driver</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.ink, fontSize: 20, lineHeight: 1 }}>×</button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: 22 }}>
+          <Field label="Full Name *"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. P. Silva" /></Field>
+          <Field label="Employee Number *"><Input value={empNo} onChange={(e) => setEmpNo(e.target.value)} placeholder="e.g. DRV-0021" /></Field>
+          <Field label="Contact Number"><Input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="e.g. 071-2223344" /></Field>
+          <Field label="License Number"><Input value={license} onChange={(e) => setLicense(e.target.value)} placeholder="e.g. B1122334" /></Field>
+          <Field label="License Expiry"><Input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} /></Field>
+          <Field label="Status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option>Active</option>
+              <option>On Leave</option>
+              <option>Inactive</option>
+            </Select>
+          </Field>
+
+          <ErrorBanner>{error}</ErrorBanner>
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+            <Btn variant="ghost" onClick={onClose} type="button">Cancel</Btn>
+            <Btn type="submit" onClick={handleSubmit} disabled={saving}>{saving ? "Saving…" : "Add Driver"}</Btn>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
 
 /* ================= DRIVERS PANEL ================= */
-function DriverPanel({ drivers, requests }) {
+function DriverPanel({ drivers, requests, roleKey, setDrivers, showToast }) {
+  const [showAdd, setShowAdd] = useState(false);
   return (
     <div>
-      <PageHeader title="Drivers" subtitle={`${drivers.length} drivers registered`} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+        <PageHeader title="Drivers" subtitle={`${drivers.length} drivers registered`} />
+        {roleKey === "admin" && (
+          <Btn icon={Plus} onClick={() => setShowAdd(true)}>Add Driver</Btn>
+        )}
+      </div>
       <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px", overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
           <thead>
@@ -2205,6 +2392,19 @@ function DriverPanel({ drivers, requests }) {
           </tbody>
         </table>
       </div>
+
+      {showAdd && (
+        <AddDriverModal
+          onClose={() => setShowAdd(false)}
+          showToast={showToast}
+          onAdded={(d) =>
+            setDrivers((ds) => [
+              ...ds,
+              { id: d.id, name: d.name, empNo: d.emp_no, contact: d.contact, license: d.license, expiry: d.expiry, status: d.status },
+            ])
+          }
+        />
+      )}
     </div>
   );
 }
