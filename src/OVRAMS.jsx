@@ -2013,8 +2013,8 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
 /* ================= NEW REQUEST MODAL ================= */
 function NewRequestModal({ currentUser, onClose, onSubmit }) {
   const [purpose, setPurpose] = useState("");
-  const [destination, setDestination] = useState("");
-  const [journeyType, setJourneyType] = useState("Local");
+  const [startingLocation, setStartingLocation] = useState("");
+  const [destinationLocation, setDestinationLocation] = useState("");
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -2036,7 +2036,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
   }
   function submit() {
     setError("");
-    if (!purpose || !destination || !startDate || !startTime || !endDate || !endTime) {
+    if (!purpose || !startingLocation || !destinationLocation || !startDate || !startTime || !endDate || !endTime) {
       setError("Please complete all required fields.");
       return;
     }
@@ -2053,7 +2053,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
     const id = `REQ-2026-0${Math.floor(150 + Math.random() * 800)}`;
     onSubmit({
       id, applicantId: currentUser.id, division: currentUser.division,
-      purpose, destination, journeyType, start, end, adequateSpace,
+      purpose, startingLocation, destinationLocation, start, end, adequateSpace,
       officers: officers.filter((o) => o.name),
       status: STATUS.SUBMITTED,
       history: [{ who: currentUser.name, action: "Submitted request", at: new Date().toISOString() }],
@@ -2085,13 +2085,8 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
 
           <SectionCard label="Section B" title="Journey Information">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 14 }}>
-              <Field label="Destination *"><Input value={destination} onChange={(e) => setDestination(e.target.value)} /></Field>
-              <Field label="Journey Type *">
-                <Select value={journeyType} onChange={(e) => setJourneyType(e.target.value)}>
-                  <option>Local</option>
-                  <option>External</option>
-                </Select>
-              </Field>
+              <Field label="Starting Point *"><Input value={startingLocation} onChange={(e) => setStartingLocation(e.target.value)} /></Field>
+              <Field label="Destination *"><Input value={destinationLocation} onChange={(e) => setDestinationLocation(e.target.value)} /></Field>
               <Field label="Starting Date *"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
               <Field label="Starting Time *"><Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></Field>
               <Field label="Ending Date *"><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
@@ -2233,7 +2228,7 @@ function SchedulePanel({ requests }) {
               <div style={{ flex: "1 1 140px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}><Truck size={13} color={COLORS.greenSoft} /> {v ? v.reg : "—"}</div>
               <div style={{ flex: "1 1 120px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}><User size={13} color={COLORS.greenSoft} /> {d ? d.name : "—"}</div>
               <div style={{ flex: "1 1 160px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>{fmtDT(r.start)}</div>
-              <div style={{ flex: "1 1 220px", fontSize: 12.5, color: COLORS.inkSoft }}>{r.destination}</div>
+              <div style={{ flex: "1 1 220px", fontSize: 12.5, color: COLORS.inkSoft }}>{r.destinationLocation}</div>
               <Badge status={r.status} />
             </div>
           );
