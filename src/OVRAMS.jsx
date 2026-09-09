@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import jsPDF from "jspdf";
 import {
   Truck, Users, Calendar, FileText, Bell, LayoutGrid,
   ClipboardCheck, CheckCircle2, XCircle, ArrowLeftRight, Plus, Trash2,
@@ -245,6 +246,154 @@ function fmtD(s) {
 }
 function overlaps(aStart, aEnd, bStart, bEnd) {
   return new Date(aStart) < new Date(bEnd) && new Date(bStart) < new Date(aEnd);
+}
+
+/* Generates a clean, consistent PDF of a request's official record,
+   independent of any browser's print engine — so it looks identical on
+   every device, with no browser-added headers/footers/URLs. */
+function generateRequestPDF(req, applicant, vehicle, driver) {
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 48;
+  let y = 56;
+
+  function heading(text, size = 11) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(size);
+    doc.setTextColor(20, 20, 20);
+    doc.text(text, margin, y);
+    y += 4;
+    doc.setDrawColor(210, 205, 190);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 18;
+  }
+
+  function fieldRow(fields) {
+    // fields: array of [label, value], laid out across the page width
+    const colWidth = (pageWidth - margin * 2) / fields.length;
+    fields.forEach(([label, value], i) => {
+      const x = margin + i * colWidth;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(120, 115, 100);
+      doc.text(label.toUpperCase(), x, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10.5);
+      doc.setTextColor(30, 30, 30);
+      doc.text(String(value || "—"), x, y + 14, { maxWidth: colWidth - 10 });
+    });
+    y += 38;
+  }
+
+  // Title block
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(100, 95, 85);
+  doc.text("MOYAS-F07", margin, y);
+  y += 18;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.setTextColor(20, 20, 20);
+  doc.text(req.id, margin, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(90, 90, 90);
+  doc.text(String(req.status), pageWidth - margin, y, { align: "right" });
+  y += 26;
+
+  heading("Section A — Applicant Information");
+  fieldRow([
+    ["Applicant Name", applicant ? applicant.name : "—"],
+    ["Officer / Designation", applicant ? applicant.designation : "—"],
+  ]);
+  fieldRow([
+    ["Division / Section", applicant ? applicant.division : "—"],
+    ["Purpose", req.purpose],
+  ]);
+
+  heading("Section B — Journey Information");
+  fieldRow([
+    ["Starting Location", req.startingLocation],
+    ["Destination Location", req.destinationLocation],
+  ]);
+  fieldRow([
+    ["Starting Date/Time", fmtDT(req.start)],
+    ["Ending Date/Time", fmtDT(req.end)],
+  ]);
+
+  heading("Section C — Travelling Officers");
+  (req.officers || []).forEach((o) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(30, 30, 30);
+    doc.text(o.name || "—", margin, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(100, 95, 85);
+    doc.text(o.designation || "—", margin + 180, y);
+    doc.text(o.dept || "—", margin + 360, y);
+    y += 16;
+  });
+  y += 10;
+
+  heading("Section D — Approval Information");
+  fieldRow([["Adequate space available for approval?", req.adequateSpace || "—"]]);
+
+  if (req.vehicleId || vehicle || driver) {
+    heading("Vehicle & Driver Allocation");
+    fieldRow([
+      ["Vehicle", vehicle ? `${vehicle.reg} — ${vehicle.model}` : "—"],
+      ["Driver", driver ? driver.name : "—"],
+      ["Meter Reading", req.meter ? `${req.meter.toLocaleString()} km` : "—"],
+    ]);
+    if (req.observation) {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(9.5);
+      doc.setTextColor(90, 90, 90);
+      doc.text(`Observation: ${req.observation}`, margin, y, { maxWidth: pageWidth - margin * 2 });
+      y += 20;
+    }
+  }
+
+  heading("Approval History & Audit Trail");
+  (req.history || []).forEach((h) => {
+    if (y > 760) {
+      doc.addPage();
+      y = 56;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(30, 30, 30);
+    doc.text(h.action, margin, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(120, 115, 100);
+    doc.text(`${h.who} · ${fmtDT(h.at)}`, margin, y + 12);
+    y += h.comment ? 30 : 24;
+    if (h.comment) {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(9);
+      doc.setTextColor(80, 80, 80);
+      doc.text(`"${h.comment}"`, margin, y - 8, { maxWidth: pageWidth - margin * 2 });
+    }
+  });
+
+  // Footer with generation timestamp on every page (consistent, code-controlled)
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(150, 145, 130);
+    doc.text(
+      `OVRAMS — Vehicle Request & Approval Management · Generated ${new Date().toLocaleString()}`,
+      margin,
+      820
+    );
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, 820, { align: "right" });
+  }
+
+  doc.save(`${req.id}.pdf`);
 }
 /* userById resolves against DB_USERS_BY_ID, populated at runtime from the
    live app_users table (see the loadAll effect in the main app component). */
@@ -1769,7 +1918,11 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }} className="no-print">
           <Badge status={req.status} />
-          <Btn variant="ghost" small icon={Printer} onClick={() => window.print()}>Print / PDF</Btn>
+          <Btn variant="ghost" small icon={Printer} onClick={() => {
+            const vehicle = req.vehicleId ? vehicleById(req.vehicleId) : null;
+            const driver = req.driverId ? driverById(req.driverId) : null;
+            generateRequestPDF(req, applicant, vehicle, driver);
+          }}>Print / PDF</Btn>
         </div>
       </div>
 
