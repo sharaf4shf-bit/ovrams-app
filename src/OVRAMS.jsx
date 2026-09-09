@@ -1367,6 +1367,16 @@ export default function OVRAMS() {
         @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
         * { box-sizing: border-box; }
         ::selection { background: ${COLORS.amberBg}; }
+
+        @media print {
+          body * { visibility: hidden; }
+          #print-area, #print-area * { visibility: visible; }
+          #print-area {
+            position: absolute; left: 0; top: 0; width: 100%;
+            padding: 0; margin: 0;
+          }
+          .no-print { display: none !important; }
+        }
       `}</style>
 
       {/* ---- Top bar ---- */}
@@ -1741,18 +1751,19 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
 
   return (
     <div>
-      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: COLORS.greenSoft, fontFamily: SANS, fontSize: 13, fontWeight: 600, padding: 0, marginBottom: 16 }}>
+      <button onClick={onBack} className="no-print" style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: COLORS.greenSoft, fontFamily: SANS, fontSize: 13, fontWeight: 600, padding: 0, marginBottom: 16 }}>
         <ChevronRight size={15} style={{ transform: "rotate(180deg)" }} /> Back to list
       </button>
 
+      <div id="print-area">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ fontFamily: SANS, fontSize: 11.5, color: COLORS.inkSoft, letterSpacing: 0.3 }}>MOYAS-F07</div>
           <h1 style={{ fontFamily: SERIF, fontSize: 24, margin: "2px 0 0", fontWeight: 700 }}>{req.id}</h1>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }} className="no-print">
           <Badge status={req.status} />
-          <Btn variant="ghost" small icon={Printer}>Print / PDF</Btn>
+          <Btn variant="ghost" small icon={Printer} onClick={() => window.print()}>Print / PDF</Btn>
         </div>
       </div>
 
@@ -1828,6 +1839,8 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
           </div>
         ))}
       </SectionCard>
+      </div>
+      {/* ^ end of #print-area — everything below is workflow actions, not part of the printed record */}
 
       {/* -------- ROLE-SPECIFIC ACTION PANELS -------- */}
       {roleKey === "division_head" && req.status === STATUS.SUBMITTED && divisionHeadCanAct(currentUser, req.division) && (
