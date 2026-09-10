@@ -248,153 +248,246 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
   return new Date(aStart) < new Date(bEnd) && new Date(bStart) < new Date(aEnd);
 }
 
-/* Generates a clean, consistent PDF of a request's official record,
-   independent of any browser's print engine — so it looks identical on
-   every device, with no browser-added headers/footers/URLs. */
+/* Generates a PDF of a request's official record styled to match the
+   app's own visual design (cream background, tan section header bars,
+   bordered white cards) — independent of any browser's print engine, so
+   it looks identical on every device. */
 function generateRequestPDF(req, applicant, vehicle, driver) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 48;
-  let y = 56;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  const contentWidth = pageWidth - margin * 2;
+  let y = 40;
 
-  function heading(text, size = 11) {
+  // Colors matching the app's COLORS palette (converted to RGB)
+  const C = {
+    ink: [44, 44, 44],
+    inkSoft: [91, 91, 84],
+    paper: [246, 244, 238],
+    paperDark: [237, 234, 225],
+    line: [217, 212, 198],
+    green: [27, 58, 47],
+    greenSoft: [61, 90, 76],
+    amber: [181, 132, 46],
+    white: [255, 255, 255],
+  };
+
+  function pageBackground() {
+    doc.setFillColor(...C.paper);
+    doc.rect(0, 0, pageWidth, pageHeight, "F");
+  }
+  pageBackground();
+
+  function ensureSpace(needed) {
+    if (y + needed > pageHeight - 60) {
+      doc.addPage();
+      pageBackground();
+      y = 40;
+    }
+  }
+
+  // ---- Document header ----
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(...C.inkSoft);
+  doc.text("MOYAS-F07", margin, y);
+  y += 20;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(22);
+  doc.setTextColor(...C.ink);
+  doc.text(req.id, margin, y);
+
+  // Status badge, top right
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  const statusText = String(req.status);
+  const statusWidth = doc.getTextWidth(statusText) + 20;
+  doc.setFillColor(...C.paperDark);
+  doc.setDrawColor(...C.line);
+  doc.roundedRect(pageWidth - margin - statusWidth, y - 15, statusWidth, 20, 3, 3, "FD");
+  doc.setTextColor(...C.greenSoft);
+  doc.text(statusText, pageWidth - margin - statusWidth / 2, y - 1, { align: "center" });
+  y += 26;
+
+  // ---- Section card helper: draws a tan header bar + white body, like SectionCard ----
+  function sectionCard(label, title, drawBody) {
+    const bodyStartEstimate = y + 34; // header height
+    ensureSpace(34 + 40); // header + minimum body space before starting a section
+    const cardTop = y;
+
+    // Header bar
+    doc.setFillColor(...C.paperDark);
+    doc.rect(margin, y, contentWidth, 30, "F");
+    doc.setDrawColor(...C.line);
+    doc.rect(margin, y, contentWidth, 30, "S");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(size);
-    doc.setTextColor(20, 20, 20);
-    doc.text(text, margin, y);
-    y += 4;
-    doc.setDrawColor(210, 205, 190);
-    doc.line(margin, y, pageWidth - margin, y);
-    y += 18;
+    doc.setFontSize(8.5);
+    doc.setTextColor(...C.greenSoft);
+    doc.text(label.toUpperCase(), margin + 14, y + 19);
+    const labelWidth = doc.getTextWidth(label.toUpperCase());
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12.5);
+    doc.setTextColor(...C.ink);
+    doc.text(title, margin + 14 + labelWidth + 12, y + 20);
+    y += 30;
+
+    // Body
+    const bodyTop = y;
+    const startPage = doc.internal.getCurrentPageInfo().pageNumber;
+    y += 14; // top padding inside body
+    drawBody();
+    y += 10; // bottom padding inside body
+    const bodyBottom = y;
+    const endPage = doc.internal.getCurrentPageInfo().pageNumber;
+
+    // Body border — only draw if the section stayed on one page. If a page
+    // break happened mid-section (very long history), skip the border
+    // rather than draw it in the wrong place across pages.
+    if (startPage === endPage) {
+      doc.setDrawColor(...C.line);
+      doc.setFillColor(...C.white);
+      doc.rect(margin, bodyTop, contentWidth, bodyBottom - bodyTop, "S");
+    }
+
+    y += 16; // gap before next section
   }
 
   function fieldRow(fields) {
-    // fields: array of [label, value], laid out across the page width
-    const colWidth = (pageWidth - margin * 2) / fields.length;
+    const colWidth = contentWidth / fields.length;
+    let maxRowHeight = 30;
     fields.forEach(([label, value], i) => {
-      const x = margin + i * colWidth;
+      const x = margin + 14 + i * colWidth;
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
-      doc.setTextColor(120, 115, 100);
+      doc.setFontSize(8);
+      doc.setTextColor(...C.inkSoft);
       doc.text(label.toUpperCase(), x, y);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10.5);
-      doc.setTextColor(30, 30, 30);
-      doc.text(String(value || "—"), x, y + 14, { maxWidth: colWidth - 10 });
+      doc.setTextColor(...C.ink);
+      const lines = doc.splitTextToSize(String(value || "—"), colWidth - 24);
+      doc.text(lines, x, y + 15);
+      maxRowHeight = Math.max(maxRowHeight, 15 + lines.length * 13);
     });
-    y += 38;
+    y += maxRowHeight + 10;
   }
 
-  // Title block
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.setTextColor(100, 95, 85);
-  doc.text("MOYAS-F07", margin, y);
-  y += 18;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
-  doc.setTextColor(20, 20, 20);
-  doc.text(req.id, margin, y);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.setTextColor(90, 90, 90);
-  doc.text(String(req.status), pageWidth - margin, y, { align: "right" });
-  y += 26;
-
-  heading("Section A — Applicant Information");
-  fieldRow([
-    ["Applicant Name", applicant ? applicant.name : "—"],
-    ["Officer / Designation", applicant ? applicant.designation : "—"],
-  ]);
-  fieldRow([
-    ["Division / Section", applicant ? applicant.division : "—"],
-    ["Purpose", req.purpose],
-  ]);
-
-  heading("Section B — Journey Information");
-  fieldRow([
-    ["Starting Location", req.startingLocation],
-    ["Destination Location", req.destinationLocation],
-  ]);
-  fieldRow([
-    ["Starting Date/Time", fmtDT(req.start)],
-    ["Ending Date/Time", fmtDT(req.end)],
-  ]);
-
-  heading("Section C — Travelling Officers");
-  (req.officers || []).forEach((o) => {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(30, 30, 30);
-    doc.text(o.name || "—", margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9.5);
-    doc.setTextColor(100, 95, 85);
-    doc.text(o.designation || "—", margin + 180, y);
-    doc.text(o.dept || "—", margin + 360, y);
-    y += 16;
-  });
-  y += 10;
-
-  heading("Section D — Approval Information");
-  fieldRow([["Adequate space available for approval?", req.adequateSpace || "—"]]);
-
-  if (req.vehicleId || vehicle || driver) {
-    heading("Vehicle & Driver Allocation");
+  // ---- Section A ----
+  sectionCard("Section A", "Applicant Information", () => {
     fieldRow([
-      ["Vehicle", vehicle ? `${vehicle.reg} — ${vehicle.model}` : "—"],
-      ["Driver", driver ? driver.name : "—"],
-      ["Meter Reading", req.meter ? `${req.meter.toLocaleString()} km` : "—"],
+      ["Applicant Name", applicant ? applicant.name : "—"],
+      ["Officer / Designation", applicant ? applicant.designation : "—"],
     ]);
-    if (req.observation) {
-      doc.setFont("helvetica", "italic");
-      doc.setFontSize(9.5);
-      doc.setTextColor(90, 90, 90);
-      doc.text(`Observation: ${req.observation}`, margin, y, { maxWidth: pageWidth - margin * 2 });
-      y += 20;
-    }
-  }
-
-  heading("Approval History & Audit Trail");
-  (req.history || []).forEach((h) => {
-    if (y > 760) {
-      doc.addPage();
-      y = 56;
-    }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9.5);
-    doc.setTextColor(30, 30, 30);
-    doc.text(h.action, margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    doc.setTextColor(120, 115, 100);
-    doc.text(`${h.who} · ${fmtDT(h.at)}`, margin, y + 12);
-    y += h.comment ? 30 : 24;
-    if (h.comment) {
-      doc.setFont("helvetica", "italic");
-      doc.setFontSize(9);
-      doc.setTextColor(80, 80, 80);
-      doc.text(`"${h.comment}"`, margin, y - 8, { maxWidth: pageWidth - margin * 2 });
-    }
+    fieldRow([
+      ["Division / Section", applicant ? applicant.division : "—"],
+      ["Purpose", req.purpose],
+    ]);
   });
 
-  // Footer with generation timestamp on every page (consistent, code-controlled)
+  // ---- Section B ----
+  sectionCard("Section B", "Journey Information", () => {
+    fieldRow([
+      ["Starting Location", req.startingLocation],
+      ["Destination Location", req.destinationLocation],
+    ]);
+    fieldRow([
+      ["Starting Date/Time", fmtDT(req.start)],
+      ["Ending Date/Time", fmtDT(req.end)],
+    ]);
+  });
+
+  // ---- Section C ----
+  sectionCard("Section C", "Travelling Officers", () => {
+    (req.officers || []).forEach((o) => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(...C.ink);
+      doc.text(o.name || "—", margin + 14, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...C.inkSoft);
+      doc.text(o.designation || "—", margin + 190, y);
+      doc.text(o.dept || "—", margin + 370, y);
+      y += 18;
+    });
+  });
+
+  // ---- Section D ----
+  sectionCard("Section D", "Approval Information", () => {
+    fieldRow([["Adequate space available for approval?", req.adequateSpace || "—"]]);
+  });
+
+  // ---- Vehicle & Driver Allocation (only if applicable) ----
+  if (req.vehicleId || vehicle || driver) {
+    sectionCard("Vehicle Division", "Vehicle & Driver Allocation", () => {
+      fieldRow([
+        ["Vehicle", vehicle ? `${vehicle.reg} — ${vehicle.model}` : "—"],
+        ["Driver", driver ? driver.name : "—"],
+        ["Meter Reading", req.meter ? `${req.meter.toLocaleString()} km` : "—"],
+      ]);
+      if (req.observation) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9.5);
+        doc.setTextColor(...C.inkSoft);
+        const lines = doc.splitTextToSize(`Observation: ${req.observation}`, contentWidth - 28);
+        doc.text(lines, margin + 14, y);
+        y += lines.length * 13 + 6;
+      }
+    });
+  }
+
+  // ---- History ----
+  sectionCard("History", "Approval History & Audit Trail", () => {
+    (req.history || []).forEach((h, i) => {
+      ensureSpace(34);
+      // dot marker
+      doc.setFillColor(...C.green);
+      doc.circle(margin + 18, y - 3, 2.5, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...C.ink);
+      doc.text(h.action, margin + 28, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...C.inkSoft);
+      doc.text(`${h.who} · ${fmtDT(h.at)}`, margin + 28, y + 12);
+      y += 24;
+      if (h.comment) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(80, 80, 80);
+        const lines = doc.splitTextToSize(`"${h.comment}"`, contentWidth - 42);
+        doc.text(lines, margin + 28, y - 8);
+        y += lines.length * 12;
+      }
+      if (i < req.history.length - 1) {
+        doc.setDrawColor(...C.line);
+        doc.line(margin + 14, y, margin + contentWidth - 14, y);
+        y += 8;
+      }
+    });
+  });
+
+  // ---- Footer on every page (code-controlled, consistent everywhere) ----
   const pageCount = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(150, 145, 130);
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.inkSoft);
     doc.text(
       `OVRAMS — Vehicle Request & Approval Management · Generated ${new Date().toLocaleString()}`,
       margin,
-      820
+      pageHeight - 24
     );
-    doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, 820, { align: "right" });
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 24, { align: "right" });
   }
 
   doc.save(`${req.id}.pdf`);
 }
+
 /* userById resolves against DB_USERS_BY_ID, populated at runtime from the
    live app_users table (see the loadAll effect in the main app component). */
 let DB_USERS_BY_ID = {};
