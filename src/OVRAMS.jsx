@@ -256,231 +256,301 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 34;
+  const margin = 40;
   const contentWidth = pageWidth - margin * 2;
-  let y = 32;
+  let y = 40;
 
-  // Colors matching the app's COLORS palette (converted to RGB)
   const C = {
-    ink: [44, 44, 44],
-    inkSoft: [91, 91, 84],
-    paper: [246, 244, 238],
-    paperDark: [237, 234, 225],
-    line: [217, 212, 198],
-    green: [27, 58, 47],
-    greenSoft: [61, 90, 76],
-    amber: [181, 132, 46],
+    ink: [30, 30, 35],
+    inkSoft: [100, 105, 115],
+    line: [225, 228, 235],
+    headerBg: [241, 245, 249],
+    accent: [40, 55, 90],
     white: [255, 255, 255],
+    commentBg: [235, 243, 250],
   };
 
-  function pageBackground() {
-    doc.setFillColor(...C.paper);
-    doc.rect(0, 0, pageWidth, pageHeight, "F");
-  }
-  pageBackground();
+  const statusColorMap = {
+    [STATUS.APPROVED]: [34, 120, 75],
+    [STATUS.COMPLETED]: [34, 120, 75],
+    [STATUS.REJECTED]: [160, 45, 45],
+    [STATUS.UNAVAILABLE]: [160, 45, 45],
+    [STATUS.RETURNED]: [110, 110, 110],
+    [STATUS.CANCELLED]: [110, 110, 110],
+  };
+  const statusColor = statusColorMap[req.status] || [190, 130, 40];
 
   function ensureSpace(needed) {
-    if (y + needed > pageHeight - 40) {
+    if (y + needed > pageHeight - 50) {
       doc.addPage();
-      pageBackground();
-      y = 32;
+      y = 40;
     }
   }
 
   // ---- Document header ----
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(...C.inkSoft);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...C.ink);
   doc.text("MOYAS-F07", margin, y);
-  y += 16;
+  y += 18;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
+  doc.setFontSize(19);
   doc.setTextColor(...C.ink);
   doc.text(req.id, margin, y);
 
-  // Status badge, top right
+  // Status pill, top right
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  const statusText = String(req.status);
-  const statusWidth = doc.getTextWidth(statusText) + 18;
-  doc.setFillColor(...C.paperDark);
-  doc.setDrawColor(...C.line);
-  doc.roundedRect(pageWidth - margin - statusWidth, y - 13, statusWidth, 18, 3, 3, "FD");
-  doc.setTextColor(...C.greenSoft);
+  const statusText = String(req.status).toUpperCase();
+  const statusWidth = doc.getTextWidth(statusText) + 20;
+  doc.setFillColor(...statusColor);
+  doc.roundedRect(pageWidth - margin - statusWidth, y - 15, statusWidth, 20, 10, 10, "F");
+  doc.setTextColor(...C.white);
   doc.text(statusText, pageWidth - margin - statusWidth / 2, y - 1, { align: "center" });
-  y += 16;
+  y += 14;
 
-  // ---- Section card helper: draws a tan header bar + white body, like SectionCard ----
-  function sectionCard(label, title, drawBody, isLast) {
-    ensureSpace(24 + 30); // header + minimum body space before starting a section
+  // Divider under header
+  doc.setDrawColor(...C.ink);
+  doc.setLineWidth(1.2);
+  doc.line(margin, y, pageWidth - margin, y);
+  doc.setLineWidth(0.75);
+  y += 20;
 
-    // Header bar
-    doc.setFillColor(...C.paperDark);
-    doc.rect(margin, y, contentWidth, 22, "F");
+  // ---- Section header: accent bar + light background bar ----
+  function sectionHeader(label) {
+    ensureSpace(30);
+    doc.setFillColor(...C.headerBg);
+    doc.rect(margin, y, contentWidth, 20, "F");
+    doc.setFillColor(...C.accent);
+    doc.rect(margin, y, 3, 20, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...C.accent);
+    doc.text(label.toUpperCase(), margin + 12, y + 14);
+    y += 20;
     doc.setDrawColor(...C.line);
-    doc.rect(margin, y, contentWidth, 22, "S");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...C.greenSoft);
-    doc.text(label.toUpperCase(), margin + 10, y + 14);
-    const labelWidth = doc.getTextWidth(label.toUpperCase());
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(...C.ink);
-    doc.text(title, margin + 10 + labelWidth + 10, y + 15);
-    y += 22;
-
-    // Body
-    const bodyTop = y;
-    const startPage = doc.internal.getCurrentPageInfo().pageNumber;
-    y += 9; // top padding inside body
-    drawBody();
-    y += 6; // bottom padding inside body
-    const bodyBottom = y;
-    const endPage = doc.internal.getCurrentPageInfo().pageNumber;
-
-    // Body border — only draw if the section stayed on one page. If a page
-    // break happened mid-section (very long history), skip the border
-    // rather than draw it in the wrong place across pages.
-    if (startPage === endPage) {
-      doc.setDrawColor(...C.line);
-      doc.setFillColor(...C.white);
-      doc.rect(margin, bodyTop, contentWidth, bodyBottom - bodyTop, "S");
-    }
-
-    y += 10; // gap before next section
+    y += 18;
   }
 
   function fieldRow(fields) {
     const colWidth = contentWidth / fields.length;
     let maxRowHeight = 22;
     fields.forEach(([label, value], i) => {
-      const x = margin + 10 + i * colWidth;
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7.5);
+      const x = margin + i * colWidth;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
       doc.setTextColor(...C.inkSoft);
       doc.text(label.toUpperCase(), x, y);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       doc.setTextColor(...C.ink);
-      const lines = doc.splitTextToSize(String(value || "—"), colWidth - 18);
+      const lines = doc.splitTextToSize(String(value || "—"), colWidth - 14);
       doc.text(lines, x, y + 13);
       maxRowHeight = Math.max(maxRowHeight, 13 + lines.length * 11);
     });
-    y += maxRowHeight + 6;
+    y += maxRowHeight + 10;
   }
 
   // ---- Section A ----
-  sectionCard("Section A", "Applicant Information", () => {
-    fieldRow([
-      ["Applicant Name", applicant ? applicant.name : "—"],
-      ["Officer / Designation", applicant ? applicant.designation : "—"],
-    ]);
-    fieldRow([
-      ["Division / Section", applicant ? applicant.division : "—"],
-      ["Purpose", req.purpose],
-    ]);
-  });
+  sectionHeader("Section A — Applicant Information");
+  fieldRow([
+    ["Applicant Name", applicant ? applicant.name : "—"],
+    ["Officer / Designation", applicant ? applicant.designation : "—"],
+  ]);
+  fieldRow([
+    ["Division / Section", applicant ? applicant.division : "—"],
+    ["Purpose", req.purpose],
+  ]);
 
   // ---- Section B ----
-  sectionCard("Section B", "Journey Information", () => {
-    fieldRow([
-      ["Starting Location", req.startingLocation],
-      ["Destination Location", req.destinationLocation],
-    ]);
-    fieldRow([
-      ["Starting Date/Time", fmtDT(req.start)],
-      ["Ending Date/Time", fmtDT(req.end)],
-    ]);
-  });
+  sectionHeader("Section B — Journey Information");
+  fieldRow([
+    ["Starting Location", req.startingLocation],
+    ["Destination Location", req.destinationLocation],
+  ]);
+  fieldRow([
+    ["Starting Date/Time", fmtDT(req.start)],
+    ["Ending Date/Time", fmtDT(req.end)],
+  ]);
 
-  // ---- Section C ----
-  sectionCard("Section C", "Travelling Officers", () => {
-    (req.officers || []).forEach((o) => {
+  // ---- Section C — table of officers ----
+  sectionHeader("Section C — Travelling Officers");
+  {
+    const officers = req.officers || [];
+    const col1 = margin, col2 = margin + 190, col3 = margin + 370;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.inkSoft);
+    doc.text("OFFICER NAME", col1, y);
+    doc.text("DESIGNATION", col2, y);
+    doc.text("DIVISION", col3, y);
+    y += 8;
+    doc.setDrawColor(...C.line);
+    doc.line(margin, y, margin + contentWidth, y);
+    y += 14;
+    officers.forEach((o, i) => {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9.5);
       doc.setTextColor(...C.ink);
-      doc.text(o.name || "—", margin + 10, y);
+      doc.text(o.name || "—", col1, y);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
+      doc.setFontSize(9.5);
       doc.setTextColor(...C.inkSoft);
-      doc.text(o.designation || "—", margin + 180, y);
-      doc.text(o.dept || "—", margin + 350, y);
-      y += 14;
-    });
-  });
-
-  // ---- Section D ----
-  sectionCard("Section D", "Approval Information", () => {
-    fieldRow([["Adequate space available for approval?", req.adequateSpace || "—"]]);
-  });
-
-  // ---- Vehicle & Driver Allocation (only if applicable) ----
-  if (req.vehicleId || vehicle || driver) {
-    sectionCard("Vehicle Division", "Vehicle & Driver Allocation", () => {
-      fieldRow([
-        ["Vehicle", vehicle ? `${vehicle.reg} — ${vehicle.model}` : "—"],
-        ["Driver", driver ? driver.name : "—"],
-        ["Meter Reading", req.meter ? `${req.meter.toLocaleString()} km` : "—"],
-      ]);
-      if (req.observation) {
-        doc.setFont("helvetica", "italic");
-        doc.setFontSize(9);
-        doc.setTextColor(...C.inkSoft);
-        const lines = doc.splitTextToSize(`Observation: ${req.observation}`, contentWidth - 20);
-        doc.text(lines, margin + 10, y);
-        y += lines.length * 11 + 4;
+      doc.text(o.designation || "—", col2, y);
+      doc.text(o.dept || "—", col3, y);
+      y += 16;
+      if (i < officers.length - 1) {
+        doc.setDrawColor(...C.line);
+        doc.line(margin, y - 6, margin + contentWidth, y - 6);
       }
     });
+    y += 8;
   }
 
-  // ---- History ----
-  sectionCard("History", "Approval History & Audit Trail", () => {
-    (req.history || []).forEach((h, i) => {
-      ensureSpace(26);
-      // dot marker
-      doc.setFillColor(...C.green);
-      doc.circle(margin + 14, y - 3, 2, "F");
+  // ---- Section D ----
+  sectionHeader("Section D — Approval Information");
+  fieldRow([["Adequate space available for approval?", req.adequateSpace || "—"]]);
+
+  // ---- Vehicle & Driver Allocation — dashed sub-box ----
+  if (req.vehicleId || vehicle || driver) {
+    ensureSpace(70);
+    const boxTop = y;
+    const boxX = margin + 12;
+    const boxContentWidth = contentWidth - 24;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...C.ink);
+    const boxTitleY = y + 16;
+    doc.text("Vehicle & Driver Allocation", boxX, boxTitleY);
+    y = boxTitleY + 12;
+
+    function boxFieldRow(fields) {
+      const colWidth = boxContentWidth / fields.length;
+      let maxRowHeight = 22;
+      fields.forEach(([label, value], i) => {
+        const x = boxX + i * colWidth;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.setTextColor(...C.inkSoft);
+        doc.text(label.toUpperCase(), x, y);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(...C.ink);
+        const lines = doc.splitTextToSize(String(value || "—"), colWidth - 14);
+        doc.text(lines, x, y + 13);
+        maxRowHeight = Math.max(maxRowHeight, 13 + lines.length * 11);
+      });
+      y += maxRowHeight + 10;
+    }
+
+    boxFieldRow([
+      ["Vehicle", vehicle ? `${vehicle.reg} — ${vehicle.model}` : "—"],
+      ["Driver", driver ? driver.name : "—"],
+      ["Meter Reading", req.meter ? `${req.meter.toLocaleString()} km` : "—"],
+    ]);
+    if (req.observation) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(...C.inkSoft);
+      doc.text("OBSERVATION", boxX, y);
+      y += 12;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...C.ink);
+      const lines = doc.splitTextToSize(req.observation, boxContentWidth);
+      doc.text(lines, boxX, y);
+      y += lines.length * 12 + 6;
+    }
+    const boxBottom = y + 6;
+    doc.setDrawColor(...C.line);
+    doc.setLineDashPattern([2, 2], 0);
+    doc.rect(margin, boxTop, contentWidth, boxBottom - boxTop, "S");
+    doc.setLineDashPattern([], 0);
+    y = boxBottom + 18;
+  }
+
+  // ---- History — two columns: "Approval History" / "Audit Trail" ----
+  ensureSpace(40);
+  const colGap = 20;
+  const colW = (contentWidth - colGap) / 2;
+  const leftX = margin;
+  const rightX = margin + colW + colGap;
+  const history = req.history || [];
+  const mid = Math.ceil(history.length / 2);
+  const leftItems = history.slice(0, mid);
+  const rightItems = history.slice(mid);
+
+  doc.setFillColor(...C.headerBg);
+  doc.rect(leftX, y, colW, 20, "F");
+  doc.setFillColor(...C.accent);
+  doc.rect(leftX, y, 3, 20, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.setTextColor(...C.accent);
+  doc.text("APPROVAL HISTORY", leftX + 12, y + 14);
+
+  doc.setFillColor(...C.headerBg);
+  doc.rect(rightX, y, colW, 20, "F");
+  doc.setFillColor(...C.accent);
+  doc.rect(rightX, y, 3, 20, "F");
+  doc.text("AUDIT TRAIL", rightX + 12, y + 14);
+
+  const historyTop = y + 20 + 14;
+
+  function drawHistoryColumn(items, x, colWidth, startY) {
+    let cy = startY;
+    items.forEach((h, i) => {
+      const isLastOverall = h === history[history.length - 1];
+      doc.setFillColor(...(isLastOverall ? statusColorMap[STATUS.COMPLETED] : C.accent));
+      doc.circle(x + 4, cy - 3, 2.2, "F");
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
       doc.setTextColor(...C.ink);
-      doc.text(h.action, margin + 22, y);
+      doc.text(h.action, x + 12, cy);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setTextColor(...C.inkSoft);
-      doc.text(`${h.who} · ${fmtDT(h.at)}`, margin + 22, y + 11);
-      y += 18;
+      doc.text(`${h.who} · ${fmtDT(h.at)}`, x + 12, cy + 11);
+      cy += 18;
+
       if (h.comment) {
         doc.setFont("helvetica", "italic");
-        doc.setFontSize(8.5);
-        doc.setTextColor(80, 80, 80);
-        const lines = doc.splitTextToSize(`"${h.comment}"`, contentWidth - 34);
-        doc.text(lines, margin + 22, y - 6);
-        y += lines.length * 10;
+        doc.setFontSize(8);
+        const lines = doc.splitTextToSize(`"${h.comment}"`, colWidth - 24);
+        const boxH = lines.length * 10 + 8;
+        doc.setFillColor(...C.commentBg);
+        doc.roundedRect(x + 12, cy - 8, colWidth - 24, boxH, 2, 2, "F");
+        doc.setTextColor(60, 80, 110);
+        doc.text(lines, x + 18, cy);
+        cy += boxH + 4;
       }
-      if (i < req.history.length - 1) {
-        doc.setDrawColor(...C.line);
-        doc.line(margin + 14, y, margin + contentWidth - 14, y);
-        y += 6;
-      }
+      cy += 10;
     });
-  });
+    return cy;
+  }
+
+  const leftEnd = drawHistoryColumn(leftItems, leftX, colW, historyTop);
+  const rightEnd = drawHistoryColumn(rightItems, rightX, colW, historyTop);
+  y = Math.max(leftEnd, rightEnd) + 6;
 
   // ---- Footer on every page (code-controlled, consistent everywhere) ----
   const pageCount = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
+    doc.setDrawColor(...C.line);
+    doc.line(margin, pageHeight - 36, pageWidth - margin, pageHeight - 36);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.setTextColor(...C.inkSoft);
+    doc.text("OVRAMS — Vehicle Request & Approval Management", margin, pageHeight - 22);
     doc.text(
-      `OVRAMS — Vehicle Request & Approval Management · Generated ${new Date().toLocaleString()}`,
-      margin,
-      pageHeight - 24
+      `Generated ${new Date().toLocaleString()}  |  Page ${i} of ${pageCount}`,
+      pageWidth - margin,
+      pageHeight - 22,
+      { align: "right" }
     );
-    doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 24, { align: "right" });
   }
 
   doc.save(`${req.id}.pdf`);
