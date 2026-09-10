@@ -399,10 +399,10 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
       doc.setTextColor(...C.inkSoft);
       doc.text(o.designation || "—", col2, y);
       doc.text(o.dept || "—", col3, y);
-      y += 16;
+      y += 20;
       if (i < officers.length - 1) {
         doc.setDrawColor(...C.line);
-        doc.line(margin, y - 6, margin + contentWidth, y - 6);
+        doc.line(margin, y - 9, margin + contentWidth, y - 9);
       }
     });
     y += 8;
