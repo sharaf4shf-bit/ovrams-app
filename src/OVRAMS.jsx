@@ -256,9 +256,9 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 40;
+  const margin = 34;
   const contentWidth = pageWidth - margin * 2;
-  let y = 40;
+  let y = 32;
 
   // Colors matching the app's COLORS palette (converted to RGB)
   const C = {
@@ -280,65 +280,63 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   pageBackground();
 
   function ensureSpace(needed) {
-    if (y + needed > pageHeight - 60) {
+    if (y + needed > pageHeight - 40) {
       doc.addPage();
       pageBackground();
-      y = 40;
+      y = 32;
     }
   }
 
   // ---- Document header ----
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(...C.inkSoft);
   doc.text("MOYAS-F07", margin, y);
-  y += 20;
+  y += 16;
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(22);
+  doc.setFontSize(18);
   doc.setTextColor(...C.ink);
   doc.text(req.id, margin, y);
 
   // Status badge, top right
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.5);
+  doc.setFontSize(9);
   const statusText = String(req.status);
-  const statusWidth = doc.getTextWidth(statusText) + 20;
+  const statusWidth = doc.getTextWidth(statusText) + 18;
   doc.setFillColor(...C.paperDark);
   doc.setDrawColor(...C.line);
-  doc.roundedRect(pageWidth - margin - statusWidth, y - 15, statusWidth, 20, 3, 3, "FD");
+  doc.roundedRect(pageWidth - margin - statusWidth, y - 13, statusWidth, 18, 3, 3, "FD");
   doc.setTextColor(...C.greenSoft);
   doc.text(statusText, pageWidth - margin - statusWidth / 2, y - 1, { align: "center" });
-  y += 26;
+  y += 16;
 
   // ---- Section card helper: draws a tan header bar + white body, like SectionCard ----
-  function sectionCard(label, title, drawBody) {
-    const bodyStartEstimate = y + 34; // header height
-    ensureSpace(34 + 40); // header + minimum body space before starting a section
-    const cardTop = y;
+  function sectionCard(label, title, drawBody, isLast) {
+    ensureSpace(24 + 30); // header + minimum body space before starting a section
 
     // Header bar
     doc.setFillColor(...C.paperDark);
-    doc.rect(margin, y, contentWidth, 30, "F");
+    doc.rect(margin, y, contentWidth, 22, "F");
     doc.setDrawColor(...C.line);
-    doc.rect(margin, y, contentWidth, 30, "S");
+    doc.rect(margin, y, contentWidth, 22, "S");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
+    doc.setFontSize(7.5);
     doc.setTextColor(...C.greenSoft);
-    doc.text(label.toUpperCase(), margin + 14, y + 19);
+    doc.text(label.toUpperCase(), margin + 10, y + 14);
     const labelWidth = doc.getTextWidth(label.toUpperCase());
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12.5);
+    doc.setFontSize(11);
     doc.setTextColor(...C.ink);
-    doc.text(title, margin + 14 + labelWidth + 12, y + 20);
-    y += 30;
+    doc.text(title, margin + 10 + labelWidth + 10, y + 15);
+    y += 22;
 
     // Body
     const bodyTop = y;
     const startPage = doc.internal.getCurrentPageInfo().pageNumber;
-    y += 14; // top padding inside body
+    y += 9; // top padding inside body
     drawBody();
-    y += 10; // bottom padding inside body
+    y += 6; // bottom padding inside body
     const bodyBottom = y;
     const endPage = doc.internal.getCurrentPageInfo().pageNumber;
 
@@ -351,26 +349,26 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
       doc.rect(margin, bodyTop, contentWidth, bodyBottom - bodyTop, "S");
     }
 
-    y += 16; // gap before next section
+    y += 10; // gap before next section
   }
 
   function fieldRow(fields) {
     const colWidth = contentWidth / fields.length;
-    let maxRowHeight = 30;
+    let maxRowHeight = 22;
     fields.forEach(([label, value], i) => {
-      const x = margin + 14 + i * colWidth;
+      const x = margin + 10 + i * colWidth;
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setTextColor(...C.inkSoft);
       doc.text(label.toUpperCase(), x, y);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(10.5);
+      doc.setFontSize(10);
       doc.setTextColor(...C.ink);
-      const lines = doc.splitTextToSize(String(value || "—"), colWidth - 24);
-      doc.text(lines, x, y + 15);
-      maxRowHeight = Math.max(maxRowHeight, 15 + lines.length * 13);
+      const lines = doc.splitTextToSize(String(value || "—"), colWidth - 18);
+      doc.text(lines, x, y + 13);
+      maxRowHeight = Math.max(maxRowHeight, 13 + lines.length * 11);
     });
-    y += maxRowHeight + 10;
+    y += maxRowHeight + 6;
   }
 
   // ---- Section A ----
@@ -401,15 +399,15 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   sectionCard("Section C", "Travelling Officers", () => {
     (req.officers || []).forEach((o) => {
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.setTextColor(...C.ink);
-      doc.text(o.name || "—", margin + 14, y);
-      doc.setFont("helvetica", "normal");
       doc.setFontSize(9.5);
+      doc.setTextColor(...C.ink);
+      doc.text(o.name || "—", margin + 10, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
       doc.setTextColor(...C.inkSoft);
-      doc.text(o.designation || "—", margin + 190, y);
-      doc.text(o.dept || "—", margin + 370, y);
-      y += 18;
+      doc.text(o.designation || "—", margin + 180, y);
+      doc.text(o.dept || "—", margin + 350, y);
+      y += 14;
     });
   });
 
@@ -428,11 +426,11 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
       ]);
       if (req.observation) {
         doc.setFont("helvetica", "italic");
-        doc.setFontSize(9.5);
+        doc.setFontSize(9);
         doc.setTextColor(...C.inkSoft);
-        const lines = doc.splitTextToSize(`Observation: ${req.observation}`, contentWidth - 28);
-        doc.text(lines, margin + 14, y);
-        y += lines.length * 13 + 6;
+        const lines = doc.splitTextToSize(`Observation: ${req.observation}`, contentWidth - 20);
+        doc.text(lines, margin + 10, y);
+        y += lines.length * 11 + 4;
       }
     });
   }
@@ -440,32 +438,32 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   // ---- History ----
   sectionCard("History", "Approval History & Audit Trail", () => {
     (req.history || []).forEach((h, i) => {
-      ensureSpace(34);
+      ensureSpace(26);
       // dot marker
       doc.setFillColor(...C.green);
-      doc.circle(margin + 18, y - 3, 2.5, "F");
+      doc.circle(margin + 14, y - 3, 2, "F");
 
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(9.5);
+      doc.setFontSize(9);
       doc.setTextColor(...C.ink);
-      doc.text(h.action, margin + 28, y);
+      doc.text(h.action, margin + 22, y);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
+      doc.setFontSize(8);
       doc.setTextColor(...C.inkSoft);
-      doc.text(`${h.who} · ${fmtDT(h.at)}`, margin + 28, y + 12);
-      y += 24;
+      doc.text(`${h.who} · ${fmtDT(h.at)}`, margin + 22, y + 11);
+      y += 18;
       if (h.comment) {
         doc.setFont("helvetica", "italic");
-        doc.setFontSize(9);
+        doc.setFontSize(8.5);
         doc.setTextColor(80, 80, 80);
-        const lines = doc.splitTextToSize(`"${h.comment}"`, contentWidth - 42);
-        doc.text(lines, margin + 28, y - 8);
-        y += lines.length * 12;
+        const lines = doc.splitTextToSize(`"${h.comment}"`, contentWidth - 34);
+        doc.text(lines, margin + 22, y - 6);
+        y += lines.length * 10;
       }
       if (i < req.history.length - 1) {
         doc.setDrawColor(...C.line);
         doc.line(margin + 14, y, margin + contentWidth - 14, y);
-        y += 8;
+        y += 6;
       }
     });
   });
