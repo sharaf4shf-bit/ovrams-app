@@ -513,7 +513,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
       doc.setFontSize(7.5);
       doc.setTextColor(...C.inkSoft);
       doc.text(`${h.who} · ${fmtDT(h.at)}`, x + 12, cy + 11);
-      cy += 18;
+      cy += 20;
 
       if (h.comment) {
         doc.setFont("helvetica", "italic");
@@ -521,10 +521,10 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
         const lines = doc.splitTextToSize(`"${h.comment}"`, colWidth - 24);
         const boxH = lines.length * 10 + 8;
         doc.setFillColor(...C.commentBg);
-        doc.roundedRect(x + 12, cy - 8, colWidth - 24, boxH, 2, 2, "F");
+        doc.roundedRect(x + 12, cy, colWidth - 24, boxH, 2, 2, "F");
         doc.setTextColor(60, 80, 110);
-        doc.text(lines, x + 18, cy);
-        cy += boxH + 4;
+        doc.text(lines, x + 18, cy + 10);
+        cy += boxH + 6;
       }
       cy += 10;
     });
