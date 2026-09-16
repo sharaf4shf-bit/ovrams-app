@@ -1548,6 +1548,7 @@ export default function OVRAMS() {
           driver_id: updated.driverId,
           meter: updated.meter,
           observation: updated.observation,
+          adequate_space: updated.adequateSpace,
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
@@ -2046,6 +2047,7 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
   const [meter, setMeter] = useState(req.meter || "");
   const [observation, setObservation] = useState(req.observation || "");
   const [finalRemarks, setFinalRemarks] = useState("");
+  const [divisionAdequateSpace, setDivisionAdequateSpace] = useState(req.adequateSpace || "");
 
   const conflict = useMemo(() => {
     if (!vehicleId) return null;
@@ -2145,7 +2147,7 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
 
       {/* Section D */}
       <SectionCard label="Section D" title="Approval Information">
-        <Field label="Adequate space available for approval?"><div>{req.adequateSpace}</div></Field>
+        <Field label="Adequate space available for approval?"><div>{req.adequateSpace || "Not yet determined"}</div></Field>
       </SectionCard>
 
       {/* History / audit trail */}
@@ -2173,9 +2175,26 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
             </div>
           )}
           <Field label="Comments"><TextArea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Optional remarks" /></Field>
+          <Field label="Adequate space available for approval? (optional)">
+            <div style={{ display: "flex", gap: 16 }}>
+              {["", "Yes", "No"].map((opt) => (
+                <label key={opt || "unset"} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    checked={divisionAdequateSpace === opt}
+                    onChange={() => setDivisionAdequateSpace(opt)}
+                  />
+                  {opt || "Not specified"}
+                </label>
+              ))}
+            </div>
+          </Field>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <Btn icon={CheckCircle2} disabled={isOwnRequest} onClick={() => {
-              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.DIVISION_APPROVED }, "Approved (Division Head)", comment));
+              updateRequest(req.id, (r) => pushHistory(
+                { ...r, status: STATUS.DIVISION_APPROVED, adequateSpace: divisionAdequateSpace || r.adequateSpace },
+                "Approved (Division Head)", comment
+              ));
               showToast(`${req.id} approved and routed to Vehicle Division.`);
               onBack();
             }}>Approve</Btn>
@@ -2338,7 +2357,6 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
   const [startTime, setStartTime] = useState("");
   const [endDate, setEndDate] = useState("");
   const [endTime, setEndTime] = useState("");
-  const [adequateSpace, setAdequateSpace] = useState("Yes");
   const [officers, setOfficers] = useState([{ name: currentUser.name, designation: currentUser.designation, dept: currentUser.division }]);
   const [declared, setDeclared] = useState(false);
   const [error, setError] = useState("");
@@ -2372,7 +2390,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
     const id = `REQ-2026-0${Math.floor(150 + Math.random() * 800)}`;
     onSubmit({
       id, applicantId: currentUser.id, division: currentUser.division,
-      purpose, startingLocation, destinationLocation, start, end, adequateSpace,
+      purpose, startingLocation, destinationLocation, start, end, adequateSpace: null,
       officers: officers.filter((o) => o.name),
       status: STATUS.SUBMITTED,
       history: [{ who: currentUser.name, action: "Submitted request", at: new Date().toISOString() }],
@@ -2430,12 +2448,8 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
 
           <SectionCard label="Section D" title="Approval Information">
             <Field label="Is there adequate space for approval?">
-              <div style={{ display: "flex", gap: 16 }}>
-                {["Yes", "No"].map((opt) => (
-                  <label key={opt} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5 }}>
-                    <input type="radio" checked={adequateSpace === opt} onChange={() => setAdequateSpace(opt)} /> {opt}
-                  </label>
-                ))}
+              <div style={{ fontSize: 13.5, color: COLORS.inkSoft, fontStyle: "italic" }}>
+                To be determined by the Division Head during review.
               </div>
             </Field>
           </SectionCard>
