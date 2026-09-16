@@ -1863,7 +1863,10 @@ export default function OVRAMS() {
 
               // 2. Replace travelling officers (delete old rows, insert current ones).
               const { error: delOffError } = await supabase.from("request_officers").delete().eq("request_id", newReq.id);
-              if (delOffError) console.error("Failed to clear old officers:", delOffError);
+              if (delOffError) {
+                console.error("Failed to clear old officers:", delOffError);
+                showToast("Warning: could not update travelling officers — old entries may remain duplicated. Check Supabase RLS policies on request_officers.");
+              }
               if (newReq.officers.length) {
                 const { error: offError } = await supabase.from("request_officers").insert(
                   newReq.officers.map((o) => ({
