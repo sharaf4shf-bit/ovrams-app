@@ -5,7 +5,7 @@ import {
   Truck, Users, Calendar, FileText, Bell, LayoutGrid,
   ClipboardCheck, CheckCircle2, XCircle, ArrowLeftRight, Plus, Trash2,
   Search, ChevronRight, User, Gauge, ShieldCheck, AlertTriangle, Printer,
-  Menu, Lock, LogOut, Eye, EyeOff,
+  Menu, Lock, LogOut, Eye, EyeOff, Pencil,
 } from "lucide-react";
 
 /* ----------------------------------------------------------------------
@@ -1465,6 +1465,7 @@ export default function OVRAMS() {
   const [page, setPage] = useState("dashboard");
   const [selectedReqId, setSelectedReqId] = useState(null);
   const [showNewRequest, setShowNewRequest] = useState(false);
+  const [editingRequest, setEditingRequest] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -1776,6 +1777,7 @@ export default function OVRAMS() {
               updateRequest={updateRequest}
               pushHistory={pushHistory}
               showToast={showToast}
+              onEdit={(r) => { setEditingRequest(r); setSelectedReqId(null); }}
             />
           ) : page === "dashboard" ? (
             <Dashboard
@@ -1835,11 +1837,57 @@ export default function OVRAMS() {
         </div>
       </div>
 
-      {showNewRequest && (
+      {(showNewRequest || editingRequest) && (
         <NewRequestModal
           currentUser={currentUser}
-          onClose={() => setShowNewRequest(false)}
+          editingRequest={editingRequest}
+          onClose={() => { setShowNewRequest(false); setEditingRequest(null); }}
           onSubmit={async (newReq) => {
+            if (editingRequest) {
+              // ---- EDIT & RESUBMIT an existing (returned-for-correction) request ----
+              // 1. Update the main request row's editable fields and reset status.
+              const { error: updError } = await supabase.from("requests").update({
+                purpose: newReq.purpose,
+                starting_location: newReq.startingLocation,
+                destination_location: newReq.destinationLocation,
+                start_time: newReq.start,
+                end_time: newReq.end,
+                status: newReq.status,
+                updated_at: new Date().toISOString(),
+              }).eq("id", newReq.id);
+              if (updError) {
+                console.error("Failed to save resubmitted request:", updError);
+                showToast("Could not resubmit request — check your connection and try again.");
+                return;
+              }
+
+              // 2. Replace travelling officers (delete old rows, insert current ones).
+              const { error: delOffError } = await supabase.from("request_officers").delete().eq("request_id", newReq.id);
+              if (delOffError) console.error("Failed to clear old officers:", delOffError);
+              if (newReq.officers.length) {
+                const { error: offError } = await supabase.from("request_officers").insert(
+                  newReq.officers.map((o) => ({
+                    request_id: newReq.id, name: o.name, designation: o.designation, dept: o.dept,
+                  }))
+                );
+                if (offError) console.error("Failed to save officers:", offError);
+              }
+
+              // 3. Insert the "resubmitted" history entry (the last entry in newReq.history).
+              const lastHistory = newReq.history[newReq.history.length - 1];
+              const { error: histError } = await supabase.from("request_history").insert({
+                request_id: newReq.id, who: lastHistory.who, action: lastHistory.action, at: lastHistory.at,
+              });
+              if (histError) console.error("Failed to save history:", histError);
+
+              // 4. Update local state only after the database write succeeds.
+              setRequests((rs) => rs.map((r) => (r.id === newReq.id ? newReq : r)));
+              setEditingRequest(null);
+              showToast(`Request ${newReq.id} resubmitted for division review.`);
+              return;
+            }
+
+            // ---- CREATE a brand-new request ----
             // 1. Insert the main request row.
             const { error: reqError } = await supabase.from("requests").insert({
               id: newReq.id,
@@ -2039,7 +2087,7 @@ function RequestList({ title, requests, onOpen, onNewRequest, showNew, emptyMsg,
 }
 
 /* ================= REQUEST DETAIL ================= */
-function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, requests, updateRequest, pushHistory, showToast }) {
+function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, requests, updateRequest, pushHistory, showToast, onEdit }) {
   const applicant = userById(req.applicantId);
   const [comment, setComment] = useState("");
   const [vehicleId, setVehicleId] = useState(req.vehicleId || "");
@@ -2335,6 +2383,23 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
         </SectionCard>
       )}
 
+      {roleKey === "applicant" && isOwnRequest && req.status === STATUS.RETURNED && (
+        <SectionCard label="Action" title="Applicant Actions">
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.amberBg, color: COLORS.amber, padding: "9px 12px", borderRadius: 3, fontSize: 12.5, marginBottom: 14 }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>This request was returned by the Division Head for correction. Check the comment in the History section above, make the necessary changes, then resubmit.</span>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Btn icon={Pencil} onClick={() => onEdit(req)}>Edit & Resubmit</Btn>
+            <Btn variant="danger" icon={Trash2} onClick={() => {
+              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.CANCELLED }, "Cancelled by applicant"));
+              showToast(`${req.id} cancelled.`);
+              onBack();
+            }}>Cancel Request</Btn>
+          </div>
+        </SectionCard>
+      )}
+
       {roleKey === "applicant" && isOwnRequest && [STATUS.SUBMITTED, STATUS.DIVISION_REVIEW].includes(req.status) && (
         <SectionCard label="Action" title="Applicant Actions">
           <Btn variant="danger" icon={Trash2} onClick={() => {
@@ -2349,16 +2414,24 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
 }
 
 /* ================= NEW REQUEST MODAL ================= */
-function NewRequestModal({ currentUser, onClose, onSubmit }) {
-  const [purpose, setPurpose] = useState("");
-  const [startingLocation, setStartingLocation] = useState("");
-  const [destinationLocation, setDestinationLocation] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [startTime, setStartTime] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [endTime, setEndTime] = useState("");
-  const [officers, setOfficers] = useState([{ name: currentUser.name, designation: currentUser.designation, dept: currentUser.division }]);
-  const [declared, setDeclared] = useState(false);
+function NewRequestModal({ currentUser, onClose, onSubmit, editingRequest }) {
+  const isEdit = !!editingRequest;
+  const [initialStartDate = "", initialStartTime = ""] = isEdit && editingRequest.start ? editingRequest.start.split("T") : [];
+  const [initialEndDate = "", initialEndTime = ""] = isEdit && editingRequest.end ? editingRequest.end.split("T") : [];
+
+  const [purpose, setPurpose] = useState(isEdit ? editingRequest.purpose : "");
+  const [startingLocation, setStartingLocation] = useState(isEdit ? editingRequest.startingLocation : "");
+  const [destinationLocation, setDestinationLocation] = useState(isEdit ? editingRequest.destinationLocation : "");
+  const [startDate, setStartDate] = useState(initialStartDate);
+  const [startTime, setStartTime] = useState(initialStartTime);
+  const [endDate, setEndDate] = useState(initialEndDate);
+  const [endTime, setEndTime] = useState(initialEndTime);
+  const [officers, setOfficers] = useState(
+    isEdit && editingRequest.officers.length
+      ? editingRequest.officers
+      : [{ name: currentUser.name, designation: currentUser.designation, dept: currentUser.division }]
+  );
+  const [declared, setDeclared] = useState(isEdit);
   const [error, setError] = useState("");
 
   function addOfficer() {
@@ -2387,6 +2460,20 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
       setError("Please confirm the applicant declaration before submitting.");
       return;
     }
+    if (isEdit) {
+      onSubmit({
+        ...editingRequest,
+        purpose, startingLocation, destinationLocation, start, end,
+        officers: officers.filter((o) => o.name),
+        status: STATUS.SUBMITTED,
+        history: [
+          ...editingRequest.history,
+          { who: currentUser.name, action: "Resubmitted after correction", at: new Date().toISOString() },
+        ],
+      });
+      return;
+    }
+
     const id = `REQ-2026-0${Math.floor(150 + Math.random() * 800)}`;
     onSubmit({
       id, applicantId: currentUser.id, division: currentUser.division,
@@ -2404,7 +2491,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
           <div>
             <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.inkSoft }}>MOYAS-F07</div>
-            <h2 style={{ fontFamily: SERIF, fontSize: 19, margin: 0 }}>New Vehicle Request</h2>
+            <h2 style={{ fontFamily: SERIF, fontSize: 19, margin: 0 }}>{isEdit ? "Edit & Resubmit Request" : "New Vehicle Request"}</h2>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.ink }}><Truck style={{ display: "none" }} /><span style={{ fontSize: 20, lineHeight: 1 }}>×</span></button>
         </div>
@@ -2469,7 +2556,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
 
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={submit}>Submit Request</Btn>
+            <Btn onClick={submit}>{isEdit ? "Resubmit Request" : "Submit Request"}</Btn>
           </div>
         </div>
       </div>
