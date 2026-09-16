@@ -12,4 +12,15 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    // Use sessionStorage instead of the default localStorage so that a
+    // login persists across page refreshes (within the same tab), but is
+    // automatically cleared once the tab or browser is closed — visiting
+    // the site again later (e.g. from a fresh search/new tab) always
+    // starts at the login screen instead of silently resuming a session.
+    storage: window.sessionStorage,
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});

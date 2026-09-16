@@ -857,7 +857,7 @@ function AuthShell({ title, children }) {
           </div>
           <div style={{ fontFamily: SERIF, fontWeight: 700, fontSize: 21, color: COLORS.ink }}>OVRAMS</div>
           <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.inkSoft, letterSpacing: 0.2, marginTop: 2 }}>
-            Vehicle Request &amp; Approval Management System
+            Sports Ministry — Vehicle Request &amp; Approval Management System
           </div>
         </div>
         <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 5, overflow: "hidden" }}>
@@ -1421,12 +1421,13 @@ function ForgotPasswordScreen({ onBack }) {
 
 /* ================= MAIN APP ================= */
 export default function OVRAMS() {
-  /* Added: session state. No one sees any page until authenticated.
-     Persisted to localStorage so refreshing the page (or closing and
-     reopening the tab) doesn't log the person out. */
+  /* Session state. No one sees any page until authenticated.
+     Persisted to sessionStorage (not localStorage) so a refresh within the
+     same tab keeps the person logged in, but closing the tab/browser and
+     visiting the site again later always starts at the login screen. */
   const [session, setSession] = useState(() => {
     try {
-      const saved = localStorage.getItem("ovrams_session");
+      const saved = sessionStorage.getItem("ovrams_session");
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -1434,22 +1435,23 @@ export default function OVRAMS() {
   });
 
   /* Verify the underlying Supabase Auth session is still valid on load.
-     If it's expired or was signed out elsewhere, clear our local copy too
-     so the person is correctly sent back to the login screen rather than
-     seeing a stale, now-unauthenticated view of the app. */
+     If it's expired, was signed out elsewhere, or the tab/browser was
+     closed and reopened (sessionStorage cleared), clear our local copy
+     too so the person is correctly sent back to the login screen rather
+     than seeing a stale, now-unauthenticated view of the app. */
   useEffect(() => {
     if (!session) return;
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) {
         setSession(null);
-        try { localStorage.removeItem("ovrams_session"); } catch {}
+        try { sessionStorage.removeItem("ovrams_session"); } catch {}
       }
     });
     // Also react to sign-outs that happen elsewhere (e.g. another tab).
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
         setSession(null);
-        try { localStorage.removeItem("ovrams_session"); } catch {}
+        try { sessionStorage.removeItem("ovrams_session"); } catch {}
       }
     });
     return () => sub.subscription.unsubscribe();
@@ -1584,7 +1586,7 @@ export default function OVRAMS() {
   function handleLogin(user) {
     setSession(user);
     try {
-      localStorage.setItem("ovrams_session", JSON.stringify(user));
+      sessionStorage.setItem("ovrams_session", JSON.stringify(user));
     } catch (e) {
       console.error("Could not save session:", e);
     }
@@ -1599,7 +1601,7 @@ export default function OVRAMS() {
     await supabase.auth.signOut();
     setSession(null);
     try {
-      localStorage.removeItem("ovrams_session");
+      sessionStorage.removeItem("ovrams_session");
     } catch (e) {
       console.error("Could not clear session:", e);
     }
