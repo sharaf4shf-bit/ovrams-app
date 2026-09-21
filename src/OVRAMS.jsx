@@ -2822,7 +2822,13 @@ function EditVehicleModal({ vehicle, onClose, onSaved, showToast }) {
 function VehiclePanel({ vehicles, requests, roleKey, setVehicles, showToast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState(null);
+  const [q, setQ] = useState("");
   const statusColor = { Available: COLORS.green, Maintenance: COLORS.amber, Assigned: COLORS.blueGrey };
+  const filteredVehicles = vehicles.filter((v) => {
+    if (!q) return true;
+    const hay = [v.reg, v.type, v.model, v.status].join(" ").toLowerCase();
+    return hay.includes(q.toLowerCase());
+  });
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
@@ -2831,8 +2837,12 @@ function VehiclePanel({ vehicles, requests, roleKey, setVehicles, showToast }) {
           <Btn icon={Plus} onClick={() => setShowAdd(true)}>Add Vehicle</Btn>
         )}
       </div>
+      <div style={{ position: "relative", flex: "1 1 220px", marginBottom: 16, maxWidth: 340 }}>
+        <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
+        <Input placeholder="Search by reg. number, type, or model…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px,1fr))", gap: 14 }}>
-        {vehicles.map((v) => {
+        {filteredVehicles.map((v) => {
           const active = requests.find((r) => r.vehicleId === v.id && [STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW, STATUS.APPROVED].includes(r.status));
           return (
             <div key={v.id} style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: 16 }}>
@@ -3060,6 +3070,12 @@ function EditDriverModal({ driver, onClose, onSaved, showToast }) {
 function DriverPanel({ drivers, requests, roleKey, setDrivers, showToast }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingDriver, setEditingDriver] = useState(null);
+  const [q, setQ] = useState("");
+  const filteredDrivers = drivers.filter((d) => {
+    if (!q) return true;
+    const hay = [d.name, d.empNo, d.contact, d.license, d.status].join(" ").toLowerCase();
+    return hay.includes(q.toLowerCase());
+  });
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
@@ -3067,6 +3083,10 @@ function DriverPanel({ drivers, requests, roleKey, setDrivers, showToast }) {
         {roleKey === "admin" && (
           <Btn icon={Plus} onClick={() => setShowAdd(true)}>Add Driver</Btn>
         )}
+      </div>
+      <div style={{ position: "relative", flex: "1 1 220px", marginBottom: 16, maxWidth: 340 }}>
+        <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
+        <Input placeholder="Search by name, employee no., or license…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
       </div>
       <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px", overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
@@ -3078,7 +3098,7 @@ function DriverPanel({ drivers, requests, roleKey, setDrivers, showToast }) {
             </tr>
           </thead>
           <tbody>
-            {drivers.map((d) => (
+            {filteredDrivers.map((d) => (
               <tr key={d.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
                 <td style={{ padding: "10px 12px", fontWeight: 600 }}>{d.name}</td>
                 <td style={{ padding: "10px 12px" }}>{d.empNo}</td>
@@ -3134,10 +3154,24 @@ function DriverPanel({ drivers, requests, roleKey, setDrivers, showToast }) {
 
 /* ================= SCHEDULE PANEL ================= */
 function SchedulePanel({ requests }) {
-  const scheduled = requests.filter((r) => r.vehicleId).sort((a, b) => new Date(a.start) - new Date(b.start));
+  const [q, setQ] = useState("");
+  const scheduled = requests
+    .filter((r) => r.vehicleId)
+    .sort((a, b) => new Date(a.start) - new Date(b.start))
+    .filter((r) => {
+      if (!q) return true;
+      const v = vehicleById(r.vehicleId);
+      const d = driverById(r.driverId);
+      const hay = [r.id, v ? v.reg : "", d ? d.name : "", r.destinationLocation, r.startingLocation].join(" ").toLowerCase();
+      return hay.includes(q.toLowerCase());
+    });
   return (
     <div>
       <PageHeader title="Vehicle Schedule" subtitle="All confirmed and pending vehicle bookings" />
+      <div style={{ position: "relative", flex: "1 1 220px", marginBottom: 16, maxWidth: 340 }}>
+        <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
+        <Input placeholder="Search by ID, vehicle, driver, or location…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
+      </div>
       <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px" }}>
         {scheduled.length === 0 ? (
           <div style={{ padding: 30, textAlign: "center", color: COLORS.inkSoft, fontSize: 13.5 }}>No scheduled trips.</div>
@@ -3165,6 +3199,7 @@ function SchedulePanel({ requests }) {
 function UsersPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -3180,9 +3215,19 @@ function UsersPanel() {
     return () => { cancelled = true; };
   }, []);
 
+  const filtered = users.filter((u) => {
+    if (!q) return true;
+    const hay = [u.name, u.designation, u.division, ROLE_LABEL[u.role], u.username].join(" ").toLowerCase();
+    return hay.includes(q.toLowerCase());
+  });
+
   return (
     <div>
       <PageHeader title="Users" subtitle={loading ? "Loading…" : `${users.length} accounts`} />
+      <div style={{ position: "relative", flex: "1 1 220px", marginBottom: 16, maxWidth: 340 }}>
+        <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
+        <Input placeholder="Search by name, division, role, or username…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
+      </div>
       <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px", overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SANS, fontSize: 13.5 }}>
           <thead>
@@ -3193,7 +3238,7 @@ function UsersPanel() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {filtered.map((u) => (
               <tr key={u.id} style={{ borderBottom: `1px solid ${COLORS.line}` }}>
                 <td style={{ padding: "10px 12px", fontWeight: 600 }}>{u.name}</td>
                 <td style={{ padding: "10px 12px" }}>{u.designation}</td>
@@ -3211,12 +3256,22 @@ function UsersPanel() {
 
 /* ================= AUDIT PANEL ================= */
 function AuditPanel({ requests }) {
+  const [q, setQ] = useState("");
   const entries = requests
     .flatMap((r) => r.history.map((h) => ({ ...h, reqId: r.id })))
-    .sort((a, b) => new Date(b.at) - new Date(a.at));
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+    .filter((e) => {
+      if (!q) return true;
+      const hay = [e.reqId, e.who, e.action, e.comment || ""].join(" ").toLowerCase();
+      return hay.includes(q.toLowerCase());
+    });
   return (
     <div>
       <PageHeader title="Audit Log" subtitle="Complete history of actions across all requests" />
+      <div style={{ position: "relative", flex: "1 1 220px", marginBottom: 16, maxWidth: 340 }}>
+        <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
+        <Input placeholder="Search by request ID, user, or action…" value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 30 }} />
+      </div>
       <div style={{ background: "#fff", border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: "6px 16px" }}>
         {entries.map((e, i) => (
           <div key={i} style={{ display: "flex", gap: 14, padding: "11px 16px", borderBottom: i < entries.length - 1 ? `1px solid ${COLORS.line}` : "none", flexWrap: "wrap", fontSize: 13 }}>
