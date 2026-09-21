@@ -1702,6 +1702,7 @@ export default function OVRAMS() {
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "12px 20px", background: COLORS.green, color: "#fff",
+        position: "sticky", top: 0, zIndex: 500,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => setNavOpen((v) => !v)} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", display: "flex" }}>
