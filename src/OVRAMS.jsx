@@ -5,7 +5,7 @@ import {
   Truck, Users, Calendar, FileText, Bell, LayoutGrid,
   ClipboardCheck, CheckCircle2, XCircle, ArrowLeftRight, Plus, Trash2,
   Search, ChevronRight, User, Gauge, ShieldCheck, AlertTriangle, Printer,
-  Menu, Lock, LogOut, Eye, EyeOff,
+  Menu, Lock, LogOut, Eye, EyeOff, Pencil,
 } from "lucide-react";
 
 /* ----------------------------------------------------------------------
@@ -17,6 +17,8 @@ import {
 
 const SERIF = "'Source Serif 4', Georgia, serif";
 const SANS = "'IBM Plex Sans', system-ui, sans-serif";
+
+const VEHICLE_TYPES = ["Car", "Van", "Bus", "SUV", "Jeep", "Three Wheeler", "Truck"];
 
 const COLORS = {
   ink: "#2C2C2C",
@@ -671,23 +673,6 @@ function Input(props) {
     />
   );
 }
-
-const DEPARTMENTS = [
-  "Administration Division",
-  "Development Division",
-  "Department of Sports Development",
-  "Youth Affairs Division",
-  "Planning Division",
-  "Accounts Division",
-  "Procurement Division",
-  "Sports Division",
-  "Associations Division",
-  "Information and Communication Technology Unit",
-  "Transport Unit",
-  "Maintenance Unit",
-  "Legal Unit",
-  "Media Unit",
-];
 
 function Select(props) {
   return (
@@ -1439,9 +1424,12 @@ function ForgotPasswordScreen({ onBack }) {
 /* ================= MAIN APP ================= */
 export default function OVRAMS() {
   /* Session state. No one sees any page until authenticated.
-     Persisted to sessionStorage (not localStorage) so a refresh within the
-     same tab keeps the person logged in, but closing the tab/browser and
-     visiting the site again later always starts at the login screen. */
+     The actual decision about whether to trust a previous login now
+     happens once, synchronously, in supabaseClient.js — before this
+     component (or anything else, including AuthGate's own session check)
+     ever runs. By the time we get here, sessionStorage has already been
+     wiped clean unless this load was a genuine browser refresh, so this
+     read is simply: "is there anything left to restore?" */
   const [session, setSession] = useState(() => {
     try {
       const saved = sessionStorage.getItem("ovrams_session");
@@ -1451,20 +1439,9 @@ export default function OVRAMS() {
     }
   });
 
-  /* Verify the underlying Supabase Auth session is still valid on load.
-     If it's expired, was signed out elsewhere, or the tab/browser was
-     closed and reopened (sessionStorage cleared), clear our local copy
-     too so the person is correctly sent back to the login screen rather
-     than seeing a stale, now-unauthenticated view of the app. */
+  /* React to sign-outs that happen elsewhere (e.g. another tab), in case
+     the underlying Supabase auth state changes while this tab is open. */
   useEffect(() => {
-    if (!session) return;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        setSession(null);
-        try { sessionStorage.removeItem("ovrams_session"); } catch {}
-      }
-    });
-    // Also react to sign-outs that happen elsewhere (e.g. another tab).
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
         setSession(null);
@@ -1472,7 +1449,27 @@ export default function OVRAMS() {
       }
     });
     return () => sub.subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Belt-and-suspenders: if the browser restores this exact page from its
+     back/forward cache (e.g. pressing the Back/Forward buttons rather than
+     clicking a fresh link), clear any stored session — our own marker AND
+     Supabase's own token — and force a real reload so the app always
+     re-runs its startup logic above instead of silently showing whatever
+     was in memory before. */
+  useEffect(() => {
+    function handlePageShow(e) {
+      if (e.persisted) {
+        try {
+          Object.keys(sessionStorage).forEach((key) => {
+            if (key === "ovrams_session" || key.startsWith("sb-")) sessionStorage.removeItem(key);
+          });
+        } catch {}
+        window.location.reload();
+      }
+    }
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
   }, []);
 
   const [requests, setRequests] = useState([]);
@@ -1482,6 +1479,7 @@ export default function OVRAMS() {
   const [page, setPage] = useState("dashboard");
   const [selectedReqId, setSelectedReqId] = useState(null);
   const [showNewRequest, setShowNewRequest] = useState(false);
+  const [editingRequest, setEditingRequest] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -1716,6 +1714,7 @@ export default function OVRAMS() {
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "12px 20px", background: COLORS.green, color: "#fff",
+        position: "sticky", top: 0, zIndex: 500,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => setNavOpen((v) => !v)} style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", display: "flex" }}>
@@ -1793,6 +1792,7 @@ export default function OVRAMS() {
               updateRequest={updateRequest}
               pushHistory={pushHistory}
               showToast={showToast}
+              onEdit={(r) => { setEditingRequest(r); setSelectedReqId(null); }}
             />
           ) : page === "dashboard" ? (
             <Dashboard
@@ -1852,11 +1852,60 @@ export default function OVRAMS() {
         </div>
       </div>
 
-      {showNewRequest && (
+      {(showNewRequest || editingRequest) && (
         <NewRequestModal
           currentUser={currentUser}
-          onClose={() => setShowNewRequest(false)}
+          editingRequest={editingRequest}
+          onClose={() => { setShowNewRequest(false); setEditingRequest(null); }}
           onSubmit={async (newReq) => {
+            if (editingRequest) {
+              // ---- EDIT & RESUBMIT an existing (returned-for-correction) request ----
+              // 1. Update the main request row's editable fields and reset status.
+              const { error: updError } = await supabase.from("requests").update({
+                purpose: newReq.purpose,
+                starting_location: newReq.startingLocation,
+                destination_location: newReq.destinationLocation,
+                start_time: newReq.start,
+                end_time: newReq.end,
+                status: newReq.status,
+                updated_at: new Date().toISOString(),
+              }).eq("id", newReq.id);
+              if (updError) {
+                console.error("Failed to save resubmitted request:", updError);
+                showToast("Could not resubmit request — check your connection and try again.");
+                return;
+              }
+
+              // 2. Replace travelling officers (delete old rows, insert current ones).
+              const { error: delOffError } = await supabase.from("request_officers").delete().eq("request_id", newReq.id);
+              if (delOffError) {
+                console.error("Failed to clear old officers:", delOffError);
+                showToast("Warning: could not update travelling officers — old entries may remain duplicated. Check Supabase RLS policies on request_officers.");
+              }
+              if (newReq.officers.length) {
+                const { error: offError } = await supabase.from("request_officers").insert(
+                  newReq.officers.map((o) => ({
+                    request_id: newReq.id, name: o.name, designation: o.designation, dept: o.dept,
+                  }))
+                );
+                if (offError) console.error("Failed to save officers:", offError);
+              }
+
+              // 3. Insert the "resubmitted" history entry (the last entry in newReq.history).
+              const lastHistory = newReq.history[newReq.history.length - 1];
+              const { error: histError } = await supabase.from("request_history").insert({
+                request_id: newReq.id, who: lastHistory.who, action: lastHistory.action, at: lastHistory.at,
+              });
+              if (histError) console.error("Failed to save history:", histError);
+
+              // 4. Update local state only after the database write succeeds.
+              setRequests((rs) => rs.map((r) => (r.id === newReq.id ? newReq : r)));
+              setEditingRequest(null);
+              showToast(`Request ${newReq.id} resubmitted for division review.`);
+              return;
+            }
+
+            // ---- CREATE a brand-new request ----
             // 1. Insert the main request row.
             const { error: reqError } = await supabase.from("requests").insert({
               id: newReq.id,
@@ -1923,6 +1972,16 @@ function Dashboard({ roleKey, currentUser, requests, stats, byDivision, byMonth,
   const mine = requests.filter((r) => r.applicantId === currentUser.id);
   const available = vehicles.filter((v) => v.status === "Available").length;
   const assigned = requests.filter((r) => [STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW, STATUS.APPROVED].includes(r.status)).length;
+  const [recentQ, setRecentQ] = useState("");
+  const recentSource = roleKey === "applicant" ? mine : requests;
+  const recentFiltered = recentSource.filter((r) => {
+    if (!recentQ) return true;
+    const needle = recentQ.toLowerCase();
+    return r.id.toLowerCase().includes(needle) ||
+      (r.startingLocation || "").toLowerCase().includes(needle) ||
+      (r.destinationLocation || "").toLowerCase().includes(needle);
+  });
+  const recentDisplay = recentQ ? recentFiltered : recentFiltered.slice(0, 6);
 
   return (
     <div>
@@ -1964,7 +2023,21 @@ function Dashboard({ roleKey, currentUser, requests, stats, byDivision, byMonth,
         </div>
       )}
       <SectionCard title="Recent Requests" label="">
-        <RequestTable requests={(roleKey === "applicant" ? mine : requests).slice(0, 6)} onOpen={onOpen} />
+        <div style={{ position: "relative", maxWidth: 340, marginBottom: 14 }}>
+          <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
+          <Input
+            placeholder="Search by ID, starting location, or destination…"
+            value={recentQ}
+            onChange={(e) => setRecentQ(e.target.value)}
+            style={{ paddingLeft: 30 }}
+          />
+        </div>
+        <RequestTable requests={recentDisplay} onOpen={onOpen} emptyMsg={recentQ ? "No requests match your search." : "No requests to show."} />
+        {!recentQ && recentSource.length > 6 && (
+          <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.inkSoft, marginTop: 10 }}>
+            Showing 6 most recent of {recentSource.length}. Search above to find an older request.
+          </div>
+        )}
       </SectionCard>
     </div>
   );
@@ -1983,9 +2056,9 @@ function PageHeader({ title, subtitle, action }) {
 }
 
 /* ================= REQUEST TABLE / LIST ================= */
-function RequestTable({ requests, onOpen }) {
+function RequestTable({ requests, onOpen, emptyMsg }) {
   if (requests.length === 0) {
-    return <div style={{ fontFamily: SANS, fontSize: 13.5, color: COLORS.inkSoft, padding: "24px 0" }}>No requests to show.</div>;
+    return <div style={{ fontFamily: SANS, fontSize: 13.5, color: COLORS.inkSoft, padding: "24px 0" }}>{emptyMsg || "No requests to show."}</div>;
   }
   return (
     <div style={{ overflowX: "auto" }}>
@@ -2056,9 +2129,10 @@ function RequestList({ title, requests, onOpen, onNewRequest, showNew, emptyMsg,
 }
 
 /* ================= REQUEST DETAIL ================= */
-function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, requests, updateRequest, pushHistory, showToast }) {
+function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, requests, updateRequest, pushHistory, showToast, onEdit }) {
   const applicant = userById(req.applicantId);
   const [comment, setComment] = useState("");
+  const [vehicleType, setVehicleType] = useState("");
   const [vehicleId, setVehicleId] = useState(req.vehicleId || "");
   const [driverId, setDriverId] = useState(req.driverId || "");
   const [meter, setMeter] = useState(req.meter || "");
@@ -2232,15 +2306,26 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
       {roleKey === "transport_officer" && req.status === STATUS.DIVISION_APPROVED && (
         <SectionCard label="Action" title="Vehicle Division — Assignment">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))", gap: 14 }}>
+            <Field label="Vehicle Type">
+              <Select value={vehicleType} onChange={(e) => { setVehicleType(e.target.value); setVehicleId(""); }}>
+                <option value="">All Types</option>
+                {VEHICLE_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </Select>
+            </Field>
             <Field label="Assign Vehicle">
               <Select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
                 <option value="">Select a vehicle…</option>
-                {vehicles.map((v) => (
+                {vehicles.filter((v) => !vehicleType || v.type === vehicleType).map((v) => (
                   <option key={v.id} value={v.id} disabled={v.status !== "Available"}>
                     {v.reg} — {v.model} {v.status !== "Available" ? `(${v.status})` : ""}
                   </option>
                 ))}
               </Select>
+              {vehicleType && vehicles.filter((v) => v.type === vehicleType).length === 0 && (
+                <div style={{ fontSize: 12, color: COLORS.inkSoft, marginTop: 4 }}>No vehicles of this type in the fleet.</div>
+              )}
             </Field>
             <Field label="Assign Driver">
               <Select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
@@ -2352,6 +2437,23 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
         </SectionCard>
       )}
 
+      {roleKey === "applicant" && isOwnRequest && req.status === STATUS.RETURNED && (
+        <SectionCard label="Action" title="Applicant Actions">
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.amberBg, color: COLORS.amber, padding: "9px 12px", borderRadius: 3, fontSize: 12.5, marginBottom: 14 }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>This request was returned by the Division Head for correction. Check the comment in the History section above, make the necessary changes, then resubmit.</span>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Btn icon={Pencil} onClick={() => onEdit(req)}>Edit & Resubmit</Btn>
+            <Btn variant="danger" icon={Trash2} onClick={() => {
+              updateRequest(req.id, (r) => pushHistory({ ...r, status: STATUS.CANCELLED }, "Cancelled by applicant"));
+              showToast(`${req.id} cancelled.`);
+              onBack();
+            }}>Cancel Request</Btn>
+          </div>
+        </SectionCard>
+      )}
+
       {roleKey === "applicant" && isOwnRequest && [STATUS.SUBMITTED, STATUS.DIVISION_REVIEW].includes(req.status) && (
         <SectionCard label="Action" title="Applicant Actions">
           <Btn variant="danger" icon={Trash2} onClick={() => {
@@ -2366,16 +2468,24 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
 }
 
 /* ================= NEW REQUEST MODAL ================= */
-function NewRequestModal({ currentUser, onClose, onSubmit }) {
-  const [purpose, setPurpose] = useState("");
-  const [startingLocation, setStartingLocation] = useState("");
-  const [destinationLocation, setDestinationLocation] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [startTime, setStartTime] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [endTime, setEndTime] = useState("");
-  const [officers, setOfficers] = useState([{ name: currentUser.name, designation: currentUser.designation, dept: currentUser.division }]);
-  const [declared, setDeclared] = useState(false);
+function NewRequestModal({ currentUser, onClose, onSubmit, editingRequest }) {
+  const isEdit = !!editingRequest;
+  const [initialStartDate = "", initialStartTime = ""] = isEdit && editingRequest.start ? editingRequest.start.split("T") : [];
+  const [initialEndDate = "", initialEndTime = ""] = isEdit && editingRequest.end ? editingRequest.end.split("T") : [];
+
+  const [purpose, setPurpose] = useState(isEdit ? editingRequest.purpose : "");
+  const [startingLocation, setStartingLocation] = useState(isEdit ? editingRequest.startingLocation : "");
+  const [destinationLocation, setDestinationLocation] = useState(isEdit ? editingRequest.destinationLocation : "");
+  const [startDate, setStartDate] = useState(initialStartDate);
+  const [startTime, setStartTime] = useState(initialStartTime);
+  const [endDate, setEndDate] = useState(initialEndDate);
+  const [endTime, setEndTime] = useState(initialEndTime);
+  const [officers, setOfficers] = useState(
+    isEdit && editingRequest.officers.length
+      ? editingRequest.officers
+      : [{ name: currentUser.name, designation: currentUser.designation, dept: currentUser.division }]
+  );
+  const [declared, setDeclared] = useState(isEdit);
   const [error, setError] = useState("");
 
   function addOfficer() {
@@ -2404,6 +2514,20 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
       setError("Please confirm the applicant declaration before submitting.");
       return;
     }
+    if (isEdit) {
+      onSubmit({
+        ...editingRequest,
+        purpose, startingLocation, destinationLocation, start, end,
+        officers: officers.filter((o) => o.name),
+        status: STATUS.SUBMITTED,
+        history: [
+          ...editingRequest.history,
+          { who: currentUser.name, action: "Resubmitted after correction", at: new Date().toISOString() },
+        ],
+      });
+      return;
+    }
+
     const id = `REQ-2026-0${Math.floor(150 + Math.random() * 800)}`;
     onSubmit({
       id, applicantId: currentUser.id, division: currentUser.division,
@@ -2421,7 +2545,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: `1px solid ${COLORS.line}`, background: COLORS.paperDark }}>
           <div>
             <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.inkSoft }}>MOYAS-F07</div>
-            <h2 style={{ fontFamily: SERIF, fontSize: 19, margin: 0 }}>New Vehicle Request</h2>
+            <h2 style={{ fontFamily: SERIF, fontSize: 19, margin: 0 }}>{isEdit ? "Edit & Resubmit Request" : "New Vehicle Request"}</h2>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.ink }}><Truck style={{ display: "none" }} /><span style={{ fontSize: 20, lineHeight: 1 }}>×</span></button>
         </div>
@@ -2453,12 +2577,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
               <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <Input placeholder="Officer name" value={o.name} onChange={(e) => updateOfficer(i, "name", e.target.value)} style={{ flex: "1 1 160px" }} />
                 <Input placeholder="Designation" value={o.designation} onChange={(e) => updateOfficer(i, "designation", e.target.value)} style={{ flex: "1 1 160px" }} />
-                <Select value={o.dept} onChange={(e) => updateOfficer(i, "dept", e.target.value)} style={{ flex: "1 1 160px" }}>
-                  <option value="">Select Department</option>
-                  {DEPARTMENTS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </Select>
+                <Input placeholder="Department" value={o.dept} onChange={(e) => updateOfficer(i, "dept", e.target.value)} style={{ flex: "1 1 160px" }} />
                 {officers.length > 1 && (
                   <button onClick={() => removeOfficer(i)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red, display: "flex" }}>
                     <Trash2 size={16} />
@@ -2491,7 +2610,7 @@ function NewRequestModal({ currentUser, onClose, onSubmit }) {
 
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={submit}>Submit Request</Btn>
+            <Btn onClick={submit}>{isEdit ? "Resubmit Request" : "Submit Request"}</Btn>
           </div>
         </div>
       </div>
@@ -2556,7 +2675,14 @@ function AddVehicleModal({ onClose, onAdded, showToast }) {
         </div>
         <form onSubmit={handleSubmit} style={{ padding: 22 }}>
           <Field label="Registration Number *"><Input value={reg} onChange={(e) => setReg(e.target.value)} placeholder="e.g. WP-KA-1234" /></Field>
-          <Field label="Type *"><Input value={type} onChange={(e) => setType(e.target.value)} placeholder="e.g. Van, Car, Double Cab, Bus" /></Field>
+          <Field label="Type *">
+            <Select value={type} onChange={(e) => setType(e.target.value)}>
+              <option value="">Select type…</option>
+              {VEHICLE_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Model *"><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. Toyota HiAce (2019)" /></Field>
           <Field label="Current Meter Reading (km)"><Input type="number" value={meter} onChange={(e) => setMeter(e.target.value)} placeholder="0" /></Field>
           <Field label="Status">
@@ -2636,7 +2762,17 @@ function EditVehicleModal({ vehicle, onClose, onSaved, showToast }) {
         </div>
         <form onSubmit={handleSubmit} style={{ padding: 22 }}>
           <Field label="Registration Number *"><Input value={reg} onChange={(e) => setReg(e.target.value)} /></Field>
-          <Field label="Type *"><Input value={type} onChange={(e) => setType(e.target.value)} /></Field>
+          <Field label="Type *">
+            <Select value={type} onChange={(e) => setType(e.target.value)}>
+              <option value="">Select type…</option>
+              {!VEHICLE_TYPES.includes(vehicle.type) && vehicle.type && (
+                <option value={vehicle.type}>{vehicle.type} (legacy)</option>
+              )}
+              {VEHICLE_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Model *"><Input value={model} onChange={(e) => setModel(e.target.value)} /></Field>
           <Field label="Current Meter Reading (km)"><Input type="number" value={meter} onChange={(e) => setMeter(e.target.value)} /></Field>
           <Field label="Status">
