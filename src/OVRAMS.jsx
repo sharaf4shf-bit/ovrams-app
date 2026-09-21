@@ -1959,6 +1959,16 @@ function Dashboard({ roleKey, currentUser, requests, stats, byDivision, byMonth,
   const mine = requests.filter((r) => r.applicantId === currentUser.id);
   const available = vehicles.filter((v) => v.status === "Available").length;
   const assigned = requests.filter((r) => [STATUS.VEHICLE_ASSIGNED, STATUS.FINAL_REVIEW, STATUS.APPROVED].includes(r.status)).length;
+  const [recentQ, setRecentQ] = useState("");
+  const recentSource = roleKey === "applicant" ? mine : requests;
+  const recentFiltered = recentSource.filter((r) => {
+    if (!recentQ) return true;
+    const needle = recentQ.toLowerCase();
+    return r.id.toLowerCase().includes(needle) ||
+      (r.startingLocation || "").toLowerCase().includes(needle) ||
+      (r.destinationLocation || "").toLowerCase().includes(needle);
+  });
+  const recentDisplay = recentQ ? recentFiltered : recentFiltered.slice(0, 6);
 
   return (
     <div>
@@ -2000,7 +2010,21 @@ function Dashboard({ roleKey, currentUser, requests, stats, byDivision, byMonth,
         </div>
       )}
       <SectionCard title="Recent Requests" label="">
-        <RequestTable requests={(roleKey === "applicant" ? mine : requests).slice(0, 6)} onOpen={onOpen} />
+        <div style={{ position: "relative", maxWidth: 340, marginBottom: 14 }}>
+          <Search size={14} style={{ position: "absolute", left: 9, top: 10, color: COLORS.inkSoft }} />
+          <Input
+            placeholder="Search by ID, starting location, or destination…"
+            value={recentQ}
+            onChange={(e) => setRecentQ(e.target.value)}
+            style={{ paddingLeft: 30 }}
+          />
+        </div>
+        <RequestTable requests={recentDisplay} onOpen={onOpen} emptyMsg={recentQ ? "No requests match your search." : "No requests to show."} />
+        {!recentQ && recentSource.length > 6 && (
+          <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.inkSoft, marginTop: 10 }}>
+            Showing 6 most recent of {recentSource.length}. Search above to find an older request.
+          </div>
+        )}
       </SectionCard>
     </div>
   );
@@ -2019,9 +2043,9 @@ function PageHeader({ title, subtitle, action }) {
 }
 
 /* ================= REQUEST TABLE / LIST ================= */
-function RequestTable({ requests, onOpen }) {
+function RequestTable({ requests, onOpen, emptyMsg }) {
   if (requests.length === 0) {
-    return <div style={{ fontFamily: SANS, fontSize: 13.5, color: COLORS.inkSoft, padding: "24px 0" }}>No requests to show.</div>;
+    return <div style={{ fontFamily: SANS, fontSize: 13.5, color: COLORS.inkSoft, padding: "24px 0" }}>{emptyMsg || "No requests to show."}</div>;
   }
   return (
     <div style={{ overflowX: "auto" }}>
