@@ -1767,7 +1767,8 @@ export default function OVRAMS() {
         {/* ---- Sidebar ---- */}
         <div style={{
           width: navOpen ? 210 : 0, overflow: "hidden", transition: "width .15s",
-          borderRight: navOpen ? `1px solid ${COLORS.line}` : "none", background: "#fff", minHeight: "calc(100vh - 49px)",
+          borderRight: navOpen ? `1px solid ${COLORS.line}` : "none", background: "#fff",
+          position: "sticky", top: 49, height: "calc(100vh - 49px)", overflowY: "auto", alignSelf: "flex-start",
         }}>
           <div style={{ padding: "14px 10px", width: 210 }}>
             {nav.map((item) => {
