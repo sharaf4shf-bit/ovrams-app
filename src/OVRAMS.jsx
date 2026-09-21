@@ -18,6 +18,8 @@ import {
 const SERIF = "'Source Serif 4', Georgia, serif";
 const SANS = "'IBM Plex Sans', system-ui, sans-serif";
 
+const VEHICLE_TYPES = ["Car", "Van", "Bus", "SUV", "Jeep", "Three Wheeler", "Truck"];
+
 const COLORS = {
   ink: "#2C2C2C",
   inkSoft: "#5B5B54",
@@ -2093,6 +2095,7 @@ function RequestList({ title, requests, onOpen, onNewRequest, showNew, emptyMsg,
 function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, requests, updateRequest, pushHistory, showToast, onEdit }) {
   const applicant = userById(req.applicantId);
   const [comment, setComment] = useState("");
+  const [vehicleType, setVehicleType] = useState("");
   const [vehicleId, setVehicleId] = useState(req.vehicleId || "");
   const [driverId, setDriverId] = useState(req.driverId || "");
   const [meter, setMeter] = useState(req.meter || "");
@@ -2266,15 +2269,26 @@ function RequestDetail({ req, onBack, roleKey, currentUser, vehicles, drivers, r
       {roleKey === "transport_officer" && req.status === STATUS.DIVISION_APPROVED && (
         <SectionCard label="Action" title="Vehicle Division — Assignment">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))", gap: 14 }}>
+            <Field label="Vehicle Type">
+              <Select value={vehicleType} onChange={(e) => { setVehicleType(e.target.value); setVehicleId(""); }}>
+                <option value="">All Types</option>
+                {VEHICLE_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </Select>
+            </Field>
             <Field label="Assign Vehicle">
               <Select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
                 <option value="">Select a vehicle…</option>
-                {vehicles.map((v) => (
+                {vehicles.filter((v) => !vehicleType || v.type === vehicleType).map((v) => (
                   <option key={v.id} value={v.id} disabled={v.status !== "Available"}>
                     {v.reg} — {v.model} {v.status !== "Available" ? `(${v.status})` : ""}
                   </option>
                 ))}
               </Select>
+              {vehicleType && vehicles.filter((v) => v.type === vehicleType).length === 0 && (
+                <div style={{ fontSize: 12, color: COLORS.inkSoft, marginTop: 4 }}>No vehicles of this type in the fleet.</div>
+              )}
             </Field>
             <Field label="Assign Driver">
               <Select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
@@ -2624,7 +2638,14 @@ function AddVehicleModal({ onClose, onAdded, showToast }) {
         </div>
         <form onSubmit={handleSubmit} style={{ padding: 22 }}>
           <Field label="Registration Number *"><Input value={reg} onChange={(e) => setReg(e.target.value)} placeholder="e.g. WP-KA-1234" /></Field>
-          <Field label="Type *"><Input value={type} onChange={(e) => setType(e.target.value)} placeholder="e.g. Van, Car, Double Cab, Bus" /></Field>
+          <Field label="Type *">
+            <Select value={type} onChange={(e) => setType(e.target.value)}>
+              <option value="">Select type…</option>
+              {VEHICLE_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Model *"><Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. Toyota HiAce (2019)" /></Field>
           <Field label="Current Meter Reading (km)"><Input type="number" value={meter} onChange={(e) => setMeter(e.target.value)} placeholder="0" /></Field>
           <Field label="Status">
@@ -2704,7 +2725,17 @@ function EditVehicleModal({ vehicle, onClose, onSaved, showToast }) {
         </div>
         <form onSubmit={handleSubmit} style={{ padding: 22 }}>
           <Field label="Registration Number *"><Input value={reg} onChange={(e) => setReg(e.target.value)} /></Field>
-          <Field label="Type *"><Input value={type} onChange={(e) => setType(e.target.value)} /></Field>
+          <Field label="Type *">
+            <Select value={type} onChange={(e) => setType(e.target.value)}>
+              <option value="">Select type…</option>
+              {!VEHICLE_TYPES.includes(vehicle.type) && vehicle.type && (
+                <option value={vehicle.type}>{vehicle.type} (legacy)</option>
+              )}
+              {VEHICLE_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Model *"><Input value={model} onChange={(e) => setModel(e.target.value)} /></Field>
           <Field label="Current Meter Reading (km)"><Input type="number" value={meter} onChange={(e) => setMeter(e.target.value)} /></Field>
           <Field label="Status">
