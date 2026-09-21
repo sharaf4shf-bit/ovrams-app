@@ -1421,60 +1421,23 @@ function ForgotPasswordScreen({ onBack }) {
   );
 }
 
-/* Tells us how the current page load happened, so we can tell a genuine
-   browser refresh apart from any other way of arriving at the site
-   (a fresh click on a link, typing the URL, browser Back/Forward, a new
-   tab, etc). Defaults to "navigate" — the safest option — if the browser
-   doesn't support the check, so an unknown case always forces login
-   rather than accidentally staying logged in. */
-function getNavigationType() {
-  try {
-    const entries = performance.getEntriesByType("navigation");
-    if (entries && entries.length > 0 && entries[0].type) return entries[0].type; // "navigate" | "reload" | "back_forward" | "prerender"
-  } catch {}
-  try {
-    if (performance.navigation) {
-      if (performance.navigation.type === 1) return "reload";
-      if (performance.navigation.type === 2) return "back_forward";
-    }
-  } catch {}
-  return "navigate";
-}
-
 /* ================= MAIN APP ================= */
 export default function OVRAMS() {
   /* Session state. No one sees any page until authenticated.
-     Only a genuine page refresh (pressing the browser's Reload button,
-     Ctrl/Cmd+R, etc.) restores a previous login from sessionStorage, so
-     someone mid-task can refresh to pull the latest data without being
-     dropped back to the login screen. Every OTHER way of arriving here —
-     clicking the link again after going Back, typing the URL, opening a
-     new tab, coming back later — clears any stored session first, so it
-     always starts at the login screen instead of silently resuming
-     whoever was last logged in on that machine. */
+     The actual decision about whether to trust a previous login now
+     happens once, synchronously, in supabaseClient.js — before this
+     component (or anything else, including AuthGate's own session check)
+     ever runs. By the time we get here, sessionStorage has already been
+     wiped clean unless this load was a genuine browser refresh, so this
+     read is simply: "is there anything left to restore?" */
   const [session, setSession] = useState(() => {
     try {
-      if (getNavigationType() !== "reload") {
-        sessionStorage.removeItem("ovrams_session");
-        return null;
-      }
       const saved = sessionStorage.getItem("ovrams_session");
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
     }
   });
-
-  /* Belt-and-suspenders for the non-refresh case above: also sign out of
-     the underlying Supabase auth session (not just our own app-level
-     copy), so a stray API call can't quietly succeed using a token that
-     technically still exists in sessionStorage. */
-  useEffect(() => {
-    if (getNavigationType() !== "reload") {
-      supabase.auth.signOut().catch(() => {});
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   /* React to sign-outs that happen elsewhere (e.g. another tab), in case
      the underlying Supabase auth state changes while this tab is open. */
@@ -1490,13 +1453,18 @@ export default function OVRAMS() {
 
   /* Belt-and-suspenders: if the browser restores this exact page from its
      back/forward cache (e.g. pressing the Back/Forward buttons rather than
-     clicking a fresh link), clear any stored session and force a real
-     reload so the app always re-runs its startup logic above instead of
-     silently showing whatever was in memory before. */
+     clicking a fresh link), clear any stored session — our own marker AND
+     Supabase's own token — and force a real reload so the app always
+     re-runs its startup logic above instead of silently showing whatever
+     was in memory before. */
   useEffect(() => {
     function handlePageShow(e) {
       if (e.persisted) {
-        try { sessionStorage.removeItem("ovrams_session"); } catch {}
+        try {
+          Object.keys(sessionStorage).forEach((key) => {
+            if (key === "ovrams_session" || key.startsWith("sb-")) sessionStorage.removeItem(key);
+          });
+        } catch {}
         window.location.reload();
       }
     }
