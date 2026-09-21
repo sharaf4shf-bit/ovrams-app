@@ -1424,40 +1424,36 @@ function ForgotPasswordScreen({ onBack }) {
 /* ================= MAIN APP ================= */
 export default function OVRAMS() {
   /* Session state. No one sees any page until authenticated.
-     Persisted to sessionStorage (not localStorage) so a refresh within the
-     same tab keeps the person logged in, but closing the tab/browser and
-     visiting the site again later always starts at the login screen. */
-  const [session, setSession] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem("ovrams_session");
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+     Not persisted anywhere (no sessionStorage, no localStorage) — every
+     fresh page load starts logged out. This is intentional: officers on
+     shared computers who hit Back to a search page and click the link
+     again, refresh the tab, or just come back later should always land
+     on the login screen, never get silently dropped into the dashboard
+     of whoever was last logged in on that machine. */
+  const [session, setSession] = useState(null);
 
-  /* Verify the underlying Supabase Auth session is still valid on load.
-     If it's expired, was signed out elsewhere, or the tab/browser was
-     closed and reopened (sessionStorage cleared), clear our local copy
-     too so the person is correctly sent back to the login screen rather
-     than seeing a stale, now-unauthenticated view of the app. */
+  /* React to sign-outs that happen elsewhere (e.g. another tab), in case
+     the underlying Supabase auth state changes while this tab is open. */
   useEffect(() => {
-    if (!session) return;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        setSession(null);
-        try { sessionStorage.removeItem("ovrams_session"); } catch {}
-      }
-    });
-    // Also react to sign-outs that happen elsewhere (e.g. another tab).
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
         setSession(null);
-        try { sessionStorage.removeItem("ovrams_session"); } catch {}
       }
     });
     return () => sub.subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Belt-and-suspenders: if the browser restores this exact page from its
+     back/forward cache (e.g. pressing the Back/Forward buttons rather than
+     clicking a fresh link), force a real reload so the app always re-runs
+     its startup logic above instead of silently showing whatever was in
+     memory before — closing off every path back to a stale logged-in view. */
+  useEffect(() => {
+    function handlePageShow(e) {
+      if (e.persisted) window.location.reload();
+    }
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
   }, []);
 
   const [requests, setRequests] = useState([]);
@@ -1589,11 +1585,6 @@ export default function OVRAMS() {
 
   function handleLogin(user) {
     setSession(user);
-    try {
-      sessionStorage.setItem("ovrams_session", JSON.stringify(user));
-    } catch (e) {
-      console.error("Could not save session:", e);
-    }
     setPage("dashboard");
     setSelectedReqId(null);
     showToast(`Welcome, ${user.name}.`);
@@ -1604,11 +1595,6 @@ export default function OVRAMS() {
     // still technically active and silently log the person back in.
     await supabase.auth.signOut();
     setSession(null);
-    try {
-      sessionStorage.removeItem("ovrams_session");
-    } catch (e) {
-      console.error("Could not clear session:", e);
-    }
     setPage("dashboard");
     setSelectedReqId(null);
     setNavOpen(false);

@@ -14,13 +14,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    // Use sessionStorage instead of the default localStorage so that a
-    // login persists across page refreshes (within the same tab), but is
-    // automatically cleared once the tab or browser is closed — visiting
-    // the site again later (e.g. from a fresh search/new tab) always
-    // starts at the login screen instead of silently resuming a session.
-    storage: window.sessionStorage,
-    persistSession: true,
+    // No persisted storage at all: the session lives only in memory for the
+    // current page load. Refreshing the page, going back in browser history
+    // and re-opening the link, or revisiting the site later always starts
+    // at the login screen — nobody stays signed in across a full page load,
+    // which matters for shared/kiosk computers where officers may forget to
+    // log out.
+    persistSession: false,
     autoRefreshToken: true,
   },
 });
