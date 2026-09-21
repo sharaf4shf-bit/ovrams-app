@@ -84,6 +84,23 @@ const ROLE_LABEL = {
   admin: "System Administrator",
 };
 
+const DEPARTMENTS = [
+  "Administration Division",
+  "Development Division",
+  "Department of Sports Development",
+  "Youth Affairs Division",
+  "Planning Division",
+  "Accounts Division",
+  "Procurement Division",
+  "Sports Division",
+  "Associations Division",
+  "Information and Communication Technology Unit",
+  "Transport Unit",
+  "Maintenance Unit",
+  "Legal Unit",
+  "Media Unit",
+];
+
 const VEHICLES_SEED = [
   { id: "v1", reg: "WP-KA-1234", type: "Van", model: "Toyota HiAce (2019)", status: "Available", meter: 82011 },
   { id: "v2", reg: "WP-KB-5566", type: "Car", model: "Toyota Axio (2021)", status: "Available", meter: 41302 },
@@ -2577,7 +2594,12 @@ function NewRequestModal({ currentUser, onClose, onSubmit, editingRequest }) {
               <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <Input placeholder="Officer name" value={o.name} onChange={(e) => updateOfficer(i, "name", e.target.value)} style={{ flex: "1 1 160px" }} />
                 <Input placeholder="Designation" value={o.designation} onChange={(e) => updateOfficer(i, "designation", e.target.value)} style={{ flex: "1 1 160px" }} />
-                <Input placeholder="Department" value={o.dept} onChange={(e) => updateOfficer(i, "dept", e.target.value)} style={{ flex: "1 1 160px" }} />
+                <Select value={o.dept} onChange={(e) => updateOfficer(i, "dept", e.target.value)} style={{ flex: "1 1 160px" }}>
+                  <option value="">Select department</option>
+                  {DEPARTMENTS.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </Select>
                 {officers.length > 1 && (
                   <button onClick={() => removeOfficer(i)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red, display: "flex" }}>
                     <Trash2 size={16} />
