@@ -1421,16 +1421,60 @@ function ForgotPasswordScreen({ onBack }) {
   );
 }
 
+/* Tells us how the current page load happened, so we can tell a genuine
+   browser refresh apart from any other way of arriving at the site
+   (a fresh click on a link, typing the URL, browser Back/Forward, a new
+   tab, etc). Defaults to "navigate" — the safest option — if the browser
+   doesn't support the check, so an unknown case always forces login
+   rather than accidentally staying logged in. */
+function getNavigationType() {
+  try {
+    const entries = performance.getEntriesByType("navigation");
+    if (entries && entries.length > 0 && entries[0].type) return entries[0].type; // "navigate" | "reload" | "back_forward" | "prerender"
+  } catch {}
+  try {
+    if (performance.navigation) {
+      if (performance.navigation.type === 1) return "reload";
+      if (performance.navigation.type === 2) return "back_forward";
+    }
+  } catch {}
+  return "navigate";
+}
+
 /* ================= MAIN APP ================= */
 export default function OVRAMS() {
   /* Session state. No one sees any page until authenticated.
-     Not persisted anywhere (no sessionStorage, no localStorage) — every
-     fresh page load starts logged out. This is intentional: officers on
-     shared computers who hit Back to a search page and click the link
-     again, refresh the tab, or just come back later should always land
-     on the login screen, never get silently dropped into the dashboard
-     of whoever was last logged in on that machine. */
-  const [session, setSession] = useState(null);
+     Only a genuine page refresh (pressing the browser's Reload button,
+     Ctrl/Cmd+R, etc.) restores a previous login from sessionStorage, so
+     someone mid-task can refresh to pull the latest data without being
+     dropped back to the login screen. Every OTHER way of arriving here —
+     clicking the link again after going Back, typing the URL, opening a
+     new tab, coming back later — clears any stored session first, so it
+     always starts at the login screen instead of silently resuming
+     whoever was last logged in on that machine. */
+  const [session, setSession] = useState(() => {
+    try {
+      if (getNavigationType() !== "reload") {
+        sessionStorage.removeItem("ovrams_session");
+        return null;
+      }
+      const saved = sessionStorage.getItem("ovrams_session");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  /* Belt-and-suspenders for the non-refresh case above: also sign out of
+     the underlying Supabase auth session (not just our own app-level
+     copy), so a stray API call can't quietly succeed using a token that
+     technically still exists in sessionStorage. */
+  useEffect(() => {
+    if (getNavigationType() !== "reload") {
+      supabase.auth.signOut().catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* React to sign-outs that happen elsewhere (e.g. another tab), in case
      the underlying Supabase auth state changes while this tab is open. */
@@ -1438,6 +1482,7 @@ export default function OVRAMS() {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
         setSession(null);
+        try { sessionStorage.removeItem("ovrams_session"); } catch {}
       }
     });
     return () => sub.subscription.unsubscribe();
@@ -1445,12 +1490,15 @@ export default function OVRAMS() {
 
   /* Belt-and-suspenders: if the browser restores this exact page from its
      back/forward cache (e.g. pressing the Back/Forward buttons rather than
-     clicking a fresh link), force a real reload so the app always re-runs
-     its startup logic above instead of silently showing whatever was in
-     memory before — closing off every path back to a stale logged-in view. */
+     clicking a fresh link), clear any stored session and force a real
+     reload so the app always re-runs its startup logic above instead of
+     silently showing whatever was in memory before. */
   useEffect(() => {
     function handlePageShow(e) {
-      if (e.persisted) window.location.reload();
+      if (e.persisted) {
+        try { sessionStorage.removeItem("ovrams_session"); } catch {}
+        window.location.reload();
+      }
     }
     window.addEventListener("pageshow", handlePageShow);
     return () => window.removeEventListener("pageshow", handlePageShow);
@@ -1585,6 +1633,11 @@ export default function OVRAMS() {
 
   function handleLogin(user) {
     setSession(user);
+    try {
+      sessionStorage.setItem("ovrams_session", JSON.stringify(user));
+    } catch (e) {
+      console.error("Could not save session:", e);
+    }
     setPage("dashboard");
     setSelectedReqId(null);
     showToast(`Welcome, ${user.name}.`);
@@ -1595,6 +1648,11 @@ export default function OVRAMS() {
     // still technically active and silently log the person back in.
     await supabase.auth.signOut();
     setSession(null);
+    try {
+      sessionStorage.removeItem("ovrams_session");
+    } catch (e) {
+      console.error("Could not clear session:", e);
+    }
     setPage("dashboard");
     setSelectedReqId(null);
     setNavOpen(false);

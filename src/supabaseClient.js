@@ -14,13 +14,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    // No persisted storage at all: the session lives only in memory for the
-    // current page load. Refreshing the page, going back in browser history
-    // and re-opening the link, or revisiting the site later always starts
-    // at the login screen — nobody stays signed in across a full page load,
-    // which matters for shared/kiosk computers where officers may forget to
-    // log out.
-    persistSession: false,
+    // Stored in sessionStorage (not localStorage) so the underlying auth
+    // token can survive a genuine page refresh — but the app itself
+    // decides, on every load, whether that stored token should actually
+    // be trusted (see the navigation-type check in OVRAMS.jsx). A plain
+    // reload keeps it; any other way of arriving at the page clears it
+    // first, so this alone does not silently keep someone logged in.
+    storage: window.sessionStorage,
+    persistSession: true,
     autoRefreshToken: true,
   },
 });
