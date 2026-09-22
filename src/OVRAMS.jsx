@@ -308,7 +308,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   }
 
   // ---- Ministry header (emblem + Sinhala/Tamil/English name) ----
-  const headerImgW = contentWidth;
+  const headerImgW = contentWidth * 0.62;
   const headerImgH = (MINISTRY_HEADER_IMG_H / MINISTRY_HEADER_IMG_W) * headerImgW;
   doc.addImage(MINISTRY_HEADER_IMG, "PNG", margin, y, headerImgW, headerImgH);
   y += headerImgH + 12;
