@@ -311,7 +311,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   const headerImgW = contentWidth;
   const headerImgH = (MINISTRY_HEADER_IMG_H / MINISTRY_HEADER_IMG_W) * headerImgW;
   doc.addImage(MINISTRY_HEADER_IMG, "PNG", margin, y, headerImgW, headerImgH);
-  y += headerImgH + 22;
+  y += headerImgH + 12;
 
   // ---- Document header ----
   doc.setFont("helvetica", "bold");
@@ -356,7 +356,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
     doc.text(label.toUpperCase(), margin + 12, y + 14);
     y += 20;
     doc.setDrawColor(...C.line);
-    y += 18;
+    y += 14;
   }
 
   function fieldRow(fields) {
@@ -375,7 +375,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
       doc.text(lines, x, y + 13);
       maxRowHeight = Math.max(maxRowHeight, 13 + lines.length * 11);
     });
-    y += maxRowHeight + 10;
+    y += maxRowHeight + 6;
   }
 
   // ---- Section A ----
@@ -431,10 +431,8 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
         doc.line(margin, y - 9, margin + contentWidth, y - 9);
       }
     });
-    y += 8;
+    y += 4;
   }
-
-  // ---- Section D ----
   sectionHeader("Section D — Approval Information");
   fieldRow([["Adequate space available for approval?", req.adequateSpace || "—"]]);
 
@@ -467,7 +465,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
         doc.text(lines, x, y + 13);
         maxRowHeight = Math.max(maxRowHeight, 13 + lines.length * 11);
       });
-      y += maxRowHeight + 10;
+      y += maxRowHeight + 6;
     }
 
     boxFieldRow([
@@ -493,7 +491,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
     doc.setLineDashPattern([2, 2], 0);
     doc.rect(margin, boxTop, contentWidth, boxBottom - boxTop, "S");
     doc.setLineDashPattern([], 0);
-    y = boxBottom + 18;
+    y = boxBottom + 12;
   }
 
   // ---- History — two columns: "Approval History" / "Audit Trail" ----
@@ -522,7 +520,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   doc.rect(rightX, y, 3, 20, "F");
   doc.text("AUDIT TRAIL", rightX + 12, y + 14);
 
-  const historyTop = y + 20 + 14;
+  const historyTop = y + 20 + 10;
 
   function drawHistoryColumn(items, x, colWidth, startY) {
     let cy = startY;
