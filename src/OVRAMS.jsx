@@ -313,7 +313,7 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   // (6:1), since the source image is proportionally taller than the
   // reference header. This intentionally does not preserve the source
   // image's aspect ratio.
-  const headerImgW = contentWidth * 0.90;
+  const headerImgW = contentWidth;
   const headerImgH = 50;
   doc.addImage(MINISTRY_HEADER_IMG, "PNG", margin, y, headerImgW, headerImgH);
   y += headerImgH + 20;
