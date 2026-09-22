@@ -308,8 +308,13 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   }
 
   // ---- Ministry header (emblem + Sinhala/Tamil/English name) ----
-  const headerImgW = contentWidth * 0.85;
-  const headerImgH = (MINISTRY_HEADER_IMG_H / MINISTRY_HEADER_IMG_W) * headerImgW;
+  // NOTE: sized to match the reference document's proportions (~9.3:1
+  // width:height) rather than the source PNG's native aspect ratio
+  // (6:1), since the source image is proportionally taller than the
+  // reference header. This intentionally does not preserve the source
+  // image's aspect ratio.
+  const headerImgW = contentWidth * 0.90;
+  const headerImgH = 50;
   doc.addImage(MINISTRY_HEADER_IMG, "PNG", margin, y, headerImgW, headerImgH);
   y += headerImgH + 20;
 
