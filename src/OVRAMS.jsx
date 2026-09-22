@@ -308,15 +308,10 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
   }
 
   // ---- Ministry header (emblem + Sinhala/Tamil/English name) ----
-  const headerImgW = 260;
+  const headerImgW = contentWidth;
   const headerImgH = (MINISTRY_HEADER_IMG_H / MINISTRY_HEADER_IMG_W) * headerImgW;
   doc.addImage(MINISTRY_HEADER_IMG, "PNG", margin, y, headerImgW, headerImgH);
-  y += headerImgH + 16;
-
-  doc.setDrawColor(...C.line);
-  doc.setLineWidth(0.75);
-  doc.line(margin, y, pageWidth - margin, y);
-  y += 20;
+  y += headerImgH + 22;
 
   // ---- Document header ----
   doc.setFont("helvetica", "bold");
