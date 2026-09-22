@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import jsPDF from "jspdf";
+import { MINISTRY_HEADER_IMG, MINISTRY_HEADER_IMG_W, MINISTRY_HEADER_IMG_H } from "./ministryHeaderImage";
 import {
   Truck, Users, Calendar, FileText, Bell, LayoutGrid,
   ClipboardCheck, CheckCircle2, XCircle, ArrowLeftRight, Plus, Trash2,
@@ -305,6 +306,17 @@ function generateRequestPDF(req, applicant, vehicle, driver) {
       y = 40;
     }
   }
+
+  // ---- Ministry header (emblem + Sinhala/Tamil/English name) ----
+  const headerImgW = 260;
+  const headerImgH = (MINISTRY_HEADER_IMG_H / MINISTRY_HEADER_IMG_W) * headerImgW;
+  doc.addImage(MINISTRY_HEADER_IMG, "PNG", margin, y, headerImgW, headerImgH);
+  y += headerImgH + 16;
+
+  doc.setDrawColor(...C.line);
+  doc.setLineWidth(0.75);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 20;
 
   // ---- Document header ----
   doc.setFont("helvetica", "bold");
